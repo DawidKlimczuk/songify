@@ -1,0 +1,51 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String     @id @default(uuid())
+  email     String     @unique
+  username  String     @unique
+  avatarUrl String?
+  theme     String     @default("DARK")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  playlists Playlist[]
+}
+
+model Playlist {
+  id        String         @id @default(uuid())
+  name      String
+  coverUrl  String?
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  songs     PlaylistSong[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model Song {
+  id         String         @id // Deezer Track ID
+  title      String
+  artist     String
+  albumCover String
+  duration   Int?
+  playlists  PlaylistSong[]
+  createdAt  DateTime       @default(now())
+}
+
+model PlaylistSong {
+  playlistId String
+  songId     String
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  song       Song     @relation(fields: [songId], references: [id], onDelete: Cascade)
+  addedAt    DateTime @default(now())
+
+  @@id([playlistId, songId])
+}
