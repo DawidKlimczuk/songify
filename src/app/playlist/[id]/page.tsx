@@ -65,7 +65,7 @@ export default function PublicPlaylistPage() {
         if (likedData) {
           setLikedPlaylistId(likedData.id);
           const keys = new Set<string>();
-          likedData.songs?.forEach((item: any) => {
+          (likedData as any).songs?.forEach((item: any) => {
             // Indeksujemy po unikalnym kluczu "tytuł_artysta" dla pewności między Deezerem a bazą
             const key = `${item.song.title.toLowerCase().trim()}_${item.song.artist.toLowerCase().trim()}`;
             keys.add(key);
