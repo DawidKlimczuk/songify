@@ -15,6 +15,7 @@ export default function AudioEngine() {
   const isReadyRef = useRef(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const activeTrackIdRef = useRef<string | null>(null);
+  const silentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
     currentTrack,
@@ -32,9 +33,17 @@ export default function AudioEngine() {
     previousTrack,
   } = usePlayerStore();
 
-  // 1. Ładowanie YouTube Iframe API
+  // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla tła na Androidzie
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    // Silent Audio Anchor - niesłyszalny plik WAV w pętli podtrzymujący proces w tle
+    const audio = new Audio(
+      "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"
+    );
+    audio.loop = true;
+    silentAudioRef.current = audio;
+
     if (window.YT && window.YT.Player) return;
 
     const existingScript = document.getElementById("yt-iframe-script");
@@ -54,6 +63,7 @@ export default function AudioEngine() {
     navigator.mediaSession.setActionHandler("play", () => {
       if (isReadyRef.current && typeof playerRef.current?.playVideo === "function") {
         playerRef.current.playVideo();
+        silentAudioRef.current?.play().catch(() => {});
         setIsPlaying(true);
       }
     });
@@ -61,6 +71,7 @@ export default function AudioEngine() {
     navigator.mediaSession.setActionHandler("pause", () => {
       if (isReadyRef.current && typeof playerRef.current?.pauseVideo === "function") {
         playerRef.current.pauseVideo();
+        silentAudioRef.current?.pause();
         setIsPlaying(false);
       }
     });
@@ -73,7 +84,6 @@ export default function AudioEngine() {
       nextTrack();
     });
 
-    // Umożliwia przewijanie utworu z poziomu zablokowanego ekranu / Dynamic Island
     navigator.mediaSession.setActionHandler("seekto", (details) => {
       if (details.seekTime !== undefined && details.seekTime !== null) {
         if (playerRef.current && typeof playerRef.current.seekTo === "function") {
@@ -136,6 +146,7 @@ export default function AudioEngine() {
                 onReady: (event: any) => {
                   isReadyRef.current = true;
                   event.target.playVideo();
+                  silentAudioRef.current?.play().catch(() => {});
                   setIsPlaying(true);
                   setIsLoadingAudio(false);
                 },
@@ -143,6 +154,7 @@ export default function AudioEngine() {
                   if (event.data === 1) {
                     // PLAYING
                     setIsPlaying(true);
+                    silentAudioRef.current?.play().catch(() => {});
                     setIsLoadingAudio(false);
                     if (typeof playerRef.current?.getDuration === "function") {
                       const ytDur = playerRef.current.getDuration();
@@ -151,7 +163,7 @@ export default function AudioEngine() {
                       }
                     }
                   } else if (event.data === 0) {
-                    // ENDED -> autoodtwarzanie
+                    // ENDED -> autoodtwarzanie następnego
                     try {
                       playerRef.current?.stopVideo?.();
                     } catch {}
@@ -172,6 +184,7 @@ export default function AudioEngine() {
               startSeconds: initialTime,
             });
             playerRef.current.playVideo();
+            silentAudioRef.current?.play().catch(() => {});
             setIsPlaying(true);
           }
         };
@@ -187,7 +200,7 @@ export default function AudioEngine() {
         setIsLoadingAudio(false);
       });
 
-    // Przekazanie metadanych do systemowego odtwarzacza smartfona
+    // Przekazanie metadanych utworu do MediaSession
     if (typeof window !== "undefined" && "mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentTrack.title,
@@ -208,27 +221,28 @@ export default function AudioEngine() {
     };
   }, [currentTrack?.id]);
 
-  // 4. Synchronizacja stanu Play / Pause z MediaSession
+  // 4. Synchronizacja stanu Play / Pause z MediaSession i kotwicą audio
   useEffect(() => {
     if (!isReadyRef.current || !playerRef.current) return;
 
     try {
       if (isPlaying && typeof playerRef.current.playVideo === "function") {
         playerRef.current.playVideo();
+        silentAudioRef.current?.play().catch(() => {});
       } else if (!isPlaying && typeof playerRef.current.pauseVideo === "function") {
         playerRef.current.pauseVideo();
+        silentAudioRef.current?.pause();
       }
     } catch (err) {
       console.warn("Błąd toggle play/pause:", err);
     }
 
-    // Aktualizacja ikony (Play vs Pause) w systemie Android i na iOS
     if (typeof window !== "undefined" && "mediaSession" in navigator) {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
     }
   }, [isPlaying]);
 
-  // 5. Seek z aplikacji
+  // 5. Przewijanie (Seek) z poziomu aplikacji
   useEffect(() => {
     if (
       seekTarget !== null &&
@@ -263,7 +277,6 @@ export default function AudioEngine() {
             }
           }
 
-          // Aktualizacja suwaka czasu na ekranie blokady smartfona
           if (
             typeof window !== "undefined" &&
             "mediaSession" in navigator &&
@@ -278,9 +291,7 @@ export default function AudioEngine() {
                 playbackRate: 1.0,
                 position: Math.min(cur, currentDuration),
               });
-            } catch (e) {
-              // Ignorujemy ewentualne mikro-rozbieżności w zaokrągleniach czasu
-            }
+            } catch (e) {}
           }
         }
       }, 350);
