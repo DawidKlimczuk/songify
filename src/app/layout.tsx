@@ -8,6 +8,7 @@ import FullPlayer from "@/components/player/FullPlayer";
 import AudioEngine from "@/components/player/AudioEngine";
 import AddToPlaylistModal from "@/components/player/AddToPlaylistModal";
 import PwaRegister from "@/components/PwaRegister";
+import InstallPrompt from "@/components/InstallPrompt";
 
 const rubikDrip = Rubik_Wet_Paint({
   weight: "400",
@@ -64,6 +65,7 @@ export default function RootLayout({
       </head>
       <body className="bg-[#090e11] text-white antialiased select-none">
         <PwaRegister />
+        <InstallPrompt />
         <div className="mx-auto flex min-h-screen max-w-md flex-col relative overflow-hidden">
           <AudioEngine />
           {children}

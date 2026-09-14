@@ -1,14 +1,16 @@
-import { MetadataRoute } from 'next'
+import { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
+    id: '/',
     name: 'Songify',
     short_name: 'Songify',
     description: 'Twoja ulubiona muzyka zawsze z Tobą',
     start_url: '/',
     display: 'standalone',
     background_color: '#090e11',
-    theme_color: "#090e11",
+    theme_color: '#090e11',
+    orientation: 'portrait',
     icons: [
       {
         src: '/icon-192.png',
@@ -35,5 +37,5 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: 'any',
       },
     ],
-  }
+  };
 }
