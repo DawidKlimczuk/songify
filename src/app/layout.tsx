@@ -24,8 +24,8 @@ export const metadata: Metadata = {
     title: "Songify",
   },
   icons: {
-    icon: "/icon.svg",
-    apple: "/icon.svg",
+    icon: "/icon-192.png",
+    apple: "/icon-192.png",
   },
 };
 
@@ -48,11 +48,13 @@ const pwaAndThemeScript = `
   } catch (e) {}
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.warn('Rejestracja Service Workera nie powiodła się:', err);
+    if (document.readyState === 'complete') {
+      navigator.serviceWorker.register('/sw.js').catch(function(e) { console.error('SW error:', e); });
+    } else {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js').catch(function(e) { console.error('SW error:', e); });
       });
-    });
+    }
   }
 `;
 
@@ -64,6 +66,13 @@ export default function RootLayout({
   return (
     <html lang="pl" className={rubikDrip.variable} suppressHydrationWarning>
       <head>
+        {/* Jawne linki gwarantujące rozpoznanie PWA przez silnik Blink / Chrome */}
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+
         <Script
           id="pwa-theme-init"
           strategy="beforeInteractive"
