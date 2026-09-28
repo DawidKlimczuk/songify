@@ -509,7 +509,7 @@ export default function FullPlayer() {
                             className={`absolute inset-0 flex items-center justify-between px-4 z-0 ${
                               offsetX < 0
                                 ? "bg-red-950 text-red-400"
-                                : "bg-teal-950 text-teal-400"
+                                : "bg-teal-950 text-teal-400 swipe-action-next"
                             }`}
                           >
                             <div className="flex items-center gap-1.5 text-xs font-semibold">

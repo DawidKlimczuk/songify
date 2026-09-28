@@ -454,3 +454,13 @@ html.light div[class*="fixed inset-0"][class*="z-50"] svg.lucide-grip-vertical {
   color: #db2777 !important;
 }
 
+/* Perfekcyjna czytelność akcji "Zagraj jako następny" w motywie jasnym */
+html.light .swipe-action-next {
+  background-color: #fce7f3 !important;
+  color: #9f1239 !important;
+}
+
+html.light .swipe-action-next svg,
+html.light .swipe-action-next span {
+  color: #9f1239 !important;
+}
