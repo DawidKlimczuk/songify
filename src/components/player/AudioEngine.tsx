@@ -407,7 +407,6 @@ export default function AudioEngine() {
   // 8. Czysty Handoff bez nakładania się dźwięku i przycinek
   useEffect(() => {
     if (!isAudioHost) {
-      // Błyskawiczne ucięcie dźwięku: natychmiastowe mute + pauza, aby nie nachodziło na nowe urządzenie
       try {
         if (playerRef.current) {
           if (typeof playerRef.current.setVolume === "function") {
@@ -431,11 +430,10 @@ export default function AudioEngine() {
       hasSeeked = true;
 
       try {
-        // Przywracamy właściwą głośność dla tego urządzenia
+        const curVol = useDeviceStore.getState().volume;
         if (typeof playerRef.current.setVolume === "function") {
-          playerRef.current.setVolume(volume);
+          playerRef.current.setVolume(curVol);
         }
-        // Jednorazowy seek do dokładnej pozycji (bez dublowania)
         if (exactSec > 0 && typeof playerRef.current.seekTo === "function") {
           playerRef.current.seekTo(exactSec, true);
         }
@@ -460,15 +458,20 @@ export default function AudioEngine() {
       }, 50);
       return () => clearInterval(checkInterval);
     }
-  }, [isAudioHost, volume, setIsPlaying]);
+  }, [isAudioHost, setIsPlaying]);
 
-  // 9. Synchronizacja głośności odtwarzacza
+  // 9. Płynna zmiana głośności bez wpływu na strumień
   useEffect(() => {
-    if (playerRef.current && typeof playerRef.current.setVolume === "function" && isAudioHost) {
-      try {
+    if (!isAudioHost || !playerRef.current) return;
+    try {
+      if (typeof playerRef.current.getVolume === "function") {
+        if (playerRef.current.getVolume() !== volume) {
+          playerRef.current.setVolume(volume);
+        }
+      } else if (typeof playerRef.current.setVolume === "function") {
         playerRef.current.setVolume(volume);
-      } catch {}
-    }
+      }
+    } catch {}
   }, [volume, isAudioHost]);
 
   return (
