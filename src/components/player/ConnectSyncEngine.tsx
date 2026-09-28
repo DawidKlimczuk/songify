@@ -9,9 +9,8 @@ let activeRealtimeChannel: any = null;
 
 export default function ConnectSyncEngine() {
   const supabase = createClient();
-  const isIncomingSyncRef = useRef<boolean>(false);
-  const isSwitchingDeviceRef = useRef<boolean>(false);
-  const lastBroadcastTrackIdRef = useRef<string | null>(null);
+  const isHandlingRemoteActionRef = useRef<boolean>(false);
+  const lastTrackIdSentRef = useRef<string | null>(null);
 
   const {
     deviceId,
@@ -33,17 +32,19 @@ export default function ConnectSyncEngine() {
     setCurrentTrack,
     setIsPlaying,
     setCurrentTime,
+    nextTrack,
+    previousTrack,
     seekTo,
   } = usePlayerStore();
 
-  const isHost = !activeDeviceId || activeDeviceId === "" || activeDeviceId === deviceId;
+  const isCurrentHost = !activeDeviceId || activeDeviceId === "" || activeDeviceId === deviceId;
 
   // 1. Inicjalizacja tożsamości urządzenia
   useEffect(() => {
     initDevice();
   }, [initDevice]);
 
-  // 2. Obsługa połączenia Realtime
+  // 2. Połączenie Realtime
   useEffect(() => {
     if (!deviceId) return;
 
@@ -56,7 +57,7 @@ export default function ConnectSyncEngine() {
 
     activeRealtimeChannel = channel;
 
-    // A. Synchronizacja listy urządzeń i czyszczenie urządzeń-widm
+    // A. Czyszczenie urządzeń offline i przejmowanie roli hosta
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState();
@@ -77,23 +78,21 @@ export default function ConnectSyncEngine() {
 
         setOnlineDevices(devices);
 
-        // Jeśli dotychczasowy host zniknął z sieci (np. zamknięto kartę na PC)
+        // Jeśli wybrany host odpiął się z sieci, przejmij rolę hosta lokalnie
         const currentActive = useDeviceStore.getState().activeDeviceId;
-        const hostStillOnline = devices.some((d) => d.id === currentActive);
-
-        if (!hostStillOnline) {
-          // Przejmujemy hosta lokalnie, żeby urządzenie nie wisiało w próżni
+        if (currentActive && !devices.some((d) => d.id === currentActive)) {
           setActiveDeviceId(deviceId);
         }
       })
-      // B. Ktoś wszedł do aplikacji i pyta o aktualnie odtwarzany utwór
+      // B. Ktoś wszedł i pyta o aktualnie grający utwór
       .on("broadcast", { event: "REQUEST_HOST_STATE" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
 
-        // Jeśli to ja jestem grającym hostem, natychmiast wysyłam swój stan
-        const currentActiveId = useDeviceStore.getState().activeDeviceId;
-        if (currentActiveId === deviceId && currentTrack) {
-          activeRealtimeChannel?.send({
+        const currentActive = useDeviceStore.getState().activeDeviceId;
+        const amIHost = !currentActive || currentActive === deviceId;
+
+        if (amIHost && currentTrack) {
+          channel.send({
             type: "broadcast",
             event: "PROVIDE_HOST_STATE",
             payload: {
@@ -102,16 +101,17 @@ export default function ConnectSyncEngine() {
               currentTrack,
               queue,
               isPlaying,
-              currentTime: usePlayerStore.getState().currentTime,
+              currentTime: usePlayerStore.getState().currentTime || 0,
             },
           });
         }
       })
-      // C. Otrzymaliśmy stan od aktywnego hosta
+      // C. Otrzymanie pełnego snapshotu od hosta
       .on("broadcast", { event: "PROVIDE_HOST_STATE" }, ({ payload }) => {
         if (!payload || payload.targetId !== deviceId) return;
 
-        isIncomingSyncRef.current = true;
+        isHandlingRemoteActionRef.current = true;
+
         if (payload.activeDeviceId) {
           setActiveDeviceId(payload.activeDeviceId);
         }
@@ -127,75 +127,71 @@ export default function ConnectSyncEngine() {
         }
 
         setTimeout(() => {
-          isIncomingSyncRef.current = false;
+          isHandlingRemoteActionRef.current = false;
         }, 500);
       })
-      // D. Standardowa synchronizacja zmian w locie
-      .on("broadcast", { event: "SYNC_PLAYBACK_STATE" }, ({ payload }) => {
+      // D. Zdalne komendy użytkownika (Play, Pause, Next, Prev, Seek, zmiana urządzenia)
+      .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
 
-        isIncomingSyncRef.current = true;
+        isHandlingRemoteActionRef.current = true;
 
-        if (payload.activeDeviceId) {
-          setActiveDeviceId(payload.activeDeviceId);
-        }
+        switch (payload.type) {
+          case "SET_ACTIVE_DEVICE":
+            setActiveDeviceId(payload.targetDeviceId);
+            if (typeof payload.currentTime === "number") {
+              setCurrentTime(payload.currentTime);
+              seekTo(payload.currentTime);
+            }
+            setIsPlaying(true);
+            break;
 
-        if (payload.currentTrack) {
-          const myCurrentId = usePlayerStore.getState().currentTrack?.id;
-          if (myCurrentId !== payload.currentTrack.id) {
-            setCurrentTrack(payload.currentTrack, payload.queue || []);
-          }
-        }
+          case "SET_PLAYING":
+            setIsPlaying(payload.isPlaying);
+            break;
 
-        if (typeof payload.isPlaying === "boolean") {
-          setIsPlaying(payload.isPlaying);
-        }
+          case "NEXT_TRACK":
+            nextTrack();
+            break;
 
-        if (typeof payload.currentTime === "number") {
-          setCurrentTime(payload.currentTime);
+          case "PREV_TRACK":
+            previousTrack();
+          break;
+
+          case "SEEK_TO":
+            if (typeof payload.time === "number") {
+              seekTo(payload.time);
+            }
+            break;
+
+          case "SET_TRACK":
+            if (payload.track) {
+              setCurrentTrack(payload.track, payload.queue || []);
+              setIsPlaying(true);
+            }
+            break;
+
+          case "SET_VOLUME":
+            setVolume(payload.value);
+            break;
         }
 
         setTimeout(() => {
-          isIncomingSyncRef.current = false;
-        }, 200);
+          isHandlingRemoteActionRef.current = false;
+        }, 300);
       })
-      // E. Odbiór dokładnego ticka czasu
+      // E. Tylko i wyłącznie precyzyjny postęp suwaka (ZERO zmian isPlaying!)
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
-        const activeHost = useDeviceStore.getState().activeDeviceId;
-        if (activeHost !== deviceId) {
-          if (typeof payload.currentTime === "number") {
-            const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-            const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 1));
-            setCurrentTime(adjustedTime);
-          }
-          if (typeof payload.isPlaying === "boolean") {
-            setIsPlaying(payload.isPlaying);
-          }
-        }
-      })
-      // F. Bezpośrednie komendy
-      .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
-        if (!payload) return;
 
-        if (payload.type === "SET_ACTIVE_DEVICE") {
-          isIncomingSyncRef.current = true;
-          isSwitchingDeviceRef.current = true;
-          setActiveDeviceId(payload.targetDeviceId);
+        const currentActive = useDeviceStore.getState().activeDeviceId;
+        const amIHost = !currentActive || currentActive === deviceId;
 
-          if (typeof payload.currentTime === "number" && payload.currentTime >= 0) {
-            setCurrentTime(payload.currentTime);
-            seekTo(payload.currentTime);
-          }
-
-          setIsPlaying(true);
-
-          setTimeout(() => {
-            isIncomingSyncRef.current = false;
-            isSwitchingDeviceRef.current = false;
-          }, 1200);
-        } else if (payload.type === "SET_VOLUME") {
-          setVolume(payload.value);
+        // Czas aktualizują tylko urządzenia, które NIE są hostem
+        if (!amIHost && typeof payload.currentTime === "number") {
+          const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
+          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.8));
+          setCurrentTime(adjustedTime);
         }
       })
       .subscribe(async (status) => {
@@ -207,7 +203,7 @@ export default function ConnectSyncEngine() {
             onlineAt: new Date().toISOString(),
           });
 
-          // Pytamy sieć, czy ktoś inny już gra muzykę
+          // Pytamy sieć o stan
           channel.send({
             type: "broadcast",
             event: "REQUEST_HOST_STATE",
@@ -230,54 +226,51 @@ export default function ConnectSyncEngine() {
     setCurrentTrack,
     setIsPlaying,
     setCurrentTime,
+    nextTrack,
+    previousTrack,
     seekTo,
   ]);
 
-  // 3. Rozgłaszanie zmiany utworu
+  // 3. Rozgłaszanie zmiany utworu z tego urządzenia
   useEffect(() => {
-    if (!currentTrack || isIncomingSyncRef.current || !activeRealtimeChannel) return;
-    if (lastBroadcastTrackIdRef.current === currentTrack.id) return;
+    if (!currentTrack || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
+    if (lastTrackIdSentRef.current === currentTrack.id) return;
 
-    lastBroadcastTrackIdRef.current = currentTrack.id;
+    lastTrackIdSentRef.current = currentTrack.id;
 
     activeRealtimeChannel.send({
       type: "broadcast",
-      event: "SYNC_PLAYBACK_STATE",
+      event: "CONNECT_COMMAND",
       payload: {
         senderId: deviceId,
-        activeDeviceId: activeDeviceId || deviceId,
-        currentTrack,
+        type: "SET_TRACK",
+        track: currentTrack,
         queue,
-        isPlaying: true,
-        currentTime: 0,
       },
     });
-  }, [currentTrack?.id, queue, activeDeviceId, deviceId]);
+  }, [currentTrack?.id, queue, deviceId]);
 
-  // 4. Rozgłaszanie pauzy / startu
+  // 4. Rozgłaszanie kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
-    if (isIncomingSyncRef.current || isSwitchingDeviceRef.current || !activeRealtimeChannel || !currentTrack) return;
+    if (isHandlingRemoteActionRef.current || !activeRealtimeChannel || !currentTrack) return;
 
     activeRealtimeChannel.send({
       type: "broadcast",
-      event: "SYNC_PLAYBACK_STATE",
+      event: "CONNECT_COMMAND",
       payload: {
         senderId: deviceId,
-        activeDeviceId: activeDeviceId || deviceId,
-        currentTrack,
-        queue,
+        type: "SET_PLAYING",
         isPlaying,
-        currentTime,
       },
     });
-  }, [isPlaying]);
+  }, [isPlaying, deviceId]);
 
-  // 5. Host rozsyła precyzyjny tick czasu
+  // 5. Host audio wysyła TICK czasu (bez żadnego wymuszania isPlaying)
   useEffect(() => {
-    if (!isHost || !isPlaying || !activeRealtimeChannel || !currentTrack) return;
+    if (!isCurrentHost || !isPlaying || !activeRealtimeChannel || !currentTrack) return;
 
     const interval = setInterval(() => {
-      if (activeRealtimeChannel && !isIncomingSyncRef.current) {
+      if (activeRealtimeChannel && !isHandlingRemoteActionRef.current) {
         const exactTime = usePlayerStore.getState().currentTime;
         activeRealtimeChannel.send({
           type: "broadcast",
@@ -285,15 +278,14 @@ export default function ConnectSyncEngine() {
           payload: {
             senderId: deviceId,
             currentTime: exactTime,
-            isPlaying: true,
             sentAt: Date.now(),
           },
         });
       }
-    }, 350);
+    }, 400);
 
     return () => clearInterval(interval);
-  }, [isHost, isPlaying, deviceId, currentTrack]);
+  }, [isCurrentHost, isPlaying, deviceId, currentTrack]);
 
   return null;
 }
@@ -303,10 +295,14 @@ export async function sendConnectCommand(command: {
   [key: string]: any;
 }) {
   if (activeRealtimeChannel) {
+    const devId = useDeviceStore.getState().deviceId;
     await activeRealtimeChannel.send({
       type: "broadcast",
       event: "CONNECT_COMMAND",
-      payload: command,
+      payload: {
+        senderId: devId,
+        ...command,
+      },
     });
   }
 }

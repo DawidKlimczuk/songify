@@ -192,12 +192,6 @@ export default function AudioEngine() {
                         setDuration(ytDur);
                       }
                     }
-                  } else if (event.data === 2) {
-                    // PAUSED - reagujemy tylko jeśli to nie jest faza początkowego buforowania
-                    if (isReadyRef.current) {
-                      setIsPlaying(false);
-                      silentAudioRef.current?.pause();
-                    }
                   } else if (event.data === 0) {
                     // Sprawdzamy czy był aktywny tryb uśpienia na koniec utworu
                     const currentMode = usePlayerStore.getState().sleepTimerMode;
