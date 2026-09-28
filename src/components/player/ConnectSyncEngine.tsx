@@ -10,8 +10,8 @@ let activeRealtimeChannel: any = null;
 export default function ConnectSyncEngine() {
   const supabase = createClient();
   const isIncomingSyncRef = useRef<boolean>(false);
-  const lastBroadcastTrackIdRef = useRef<string | null>(null);
   const isSwitchingDeviceRef = useRef<boolean>(false);
+  const lastBroadcastTrackIdRef = useRef<string | null>(null);
 
   const {
     deviceId,
@@ -38,12 +38,12 @@ export default function ConnectSyncEngine() {
 
   const isHost = !activeDeviceId || activeDeviceId === "" || activeDeviceId === deviceId;
 
-  // 1. Inicjalizacja urządzenia
+  // 1. Inicjalizacja tożsamości urządzenia
   useEffect(() => {
     initDevice();
   }, [initDevice]);
 
-  // 2. Połączenie Realtime Presence + Broadcast
+  // 2. Obsługa połączenia Realtime
   useEffect(() => {
     if (!deviceId) return;
 
@@ -56,6 +56,7 @@ export default function ConnectSyncEngine() {
 
     activeRealtimeChannel = channel;
 
+    // A. Synchronizacja listy urządzeń i czyszczenie urządzeń-widm
     channel
       .on("presence", { event: "sync" }, () => {
         const state = channel.presenceState();
@@ -75,7 +76,61 @@ export default function ConnectSyncEngine() {
         });
 
         setOnlineDevices(devices);
+
+        // Jeśli dotychczasowy host zniknął z sieci (np. zamknięto kartę na PC)
+        const currentActive = useDeviceStore.getState().activeDeviceId;
+        const hostStillOnline = devices.some((d) => d.id === currentActive);
+
+        if (!hostStillOnline) {
+          // Przejmujemy hosta lokalnie, żeby urządzenie nie wisiało w próżni
+          setActiveDeviceId(deviceId);
+        }
       })
+      // B. Ktoś wszedł do aplikacji i pyta o aktualnie odtwarzany utwór
+      .on("broadcast", { event: "REQUEST_HOST_STATE" }, ({ payload }) => {
+        if (!payload || payload.senderId === deviceId) return;
+
+        // Jeśli to ja jestem grającym hostem, natychmiast wysyłam swój stan
+        const currentActiveId = useDeviceStore.getState().activeDeviceId;
+        if (currentActiveId === deviceId && currentTrack) {
+          activeRealtimeChannel?.send({
+            type: "broadcast",
+            event: "PROVIDE_HOST_STATE",
+            payload: {
+              targetId: payload.senderId,
+              activeDeviceId: deviceId,
+              currentTrack,
+              queue,
+              isPlaying,
+              currentTime: usePlayerStore.getState().currentTime,
+            },
+          });
+        }
+      })
+      // C. Otrzymaliśmy stan od aktywnego hosta
+      .on("broadcast", { event: "PROVIDE_HOST_STATE" }, ({ payload }) => {
+        if (!payload || payload.targetId !== deviceId) return;
+
+        isIncomingSyncRef.current = true;
+        if (payload.activeDeviceId) {
+          setActiveDeviceId(payload.activeDeviceId);
+        }
+        if (payload.currentTrack) {
+          setCurrentTrack(payload.currentTrack, payload.queue || []);
+        }
+        if (typeof payload.currentTime === "number") {
+          setCurrentTime(payload.currentTime);
+          seekTo(payload.currentTime);
+        }
+        if (typeof payload.isPlaying === "boolean") {
+          setIsPlaying(payload.isPlaying);
+        }
+
+        setTimeout(() => {
+          isIncomingSyncRef.current = false;
+        }, 500);
+      })
+      // D. Standardowa synchronizacja zmian w locie
       .on("broadcast", { event: "SYNC_PLAYBACK_STATE" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
 
@@ -104,20 +159,22 @@ export default function ConnectSyncEngine() {
           isIncomingSyncRef.current = false;
         }, 200);
       })
+      // E. Odbiór dokładnego ticka czasu
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
-        if (!isHost) {
+        const activeHost = useDeviceStore.getState().activeDeviceId;
+        if (activeHost !== deviceId) {
           if (typeof payload.currentTime === "number") {
             const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
             const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 1));
             setCurrentTime(adjustedTime);
           }
-          // Synchronizacja ikony odtwarzania z rzeczywistym stanem hosta
           if (typeof payload.isPlaying === "boolean") {
             setIsPlaying(payload.isPlaying);
           }
         }
       })
+      // F. Bezpośrednie komendy
       .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
         if (!payload) return;
 
@@ -125,15 +182,14 @@ export default function ConnectSyncEngine() {
           isIncomingSyncRef.current = true;
           isSwitchingDeviceRef.current = true;
           setActiveDeviceId(payload.targetDeviceId);
-          
+
           if (typeof payload.currentTime === "number" && payload.currentTime >= 0) {
             setCurrentTime(payload.currentTime);
             seekTo(payload.currentTime);
           }
-          
-          // Wymuszenie stanu grania na obu urządzeniach
+
           setIsPlaying(true);
-          
+
           setTimeout(() => {
             isIncomingSyncRef.current = false;
             isSwitchingDeviceRef.current = false;
@@ -150,6 +206,13 @@ export default function ConnectSyncEngine() {
             deviceType,
             onlineAt: new Date().toISOString(),
           });
+
+          // Pytamy sieć, czy ktoś inny już gra muzykę
+          channel.send({
+            type: "broadcast",
+            event: "REQUEST_HOST_STATE",
+            payload: { senderId: deviceId },
+          });
         }
       });
 
@@ -161,7 +224,6 @@ export default function ConnectSyncEngine() {
     deviceId,
     deviceName,
     deviceType,
-    isHost,
     setOnlineDevices,
     setActiveDeviceId,
     setVolume,
@@ -192,7 +254,7 @@ export default function ConnectSyncEngine() {
     });
   }, [currentTrack?.id, queue, activeDeviceId, deviceId]);
 
-  // 4. Rozgłaszanie play / pause (z ignorowaniem fałszywych pauz podczas transferu urządzenia)
+  // 4. Rozgłaszanie pauzy / startu
   useEffect(() => {
     if (isIncomingSyncRef.current || isSwitchingDeviceRef.current || !activeRealtimeChannel || !currentTrack) return;
 
@@ -210,7 +272,7 @@ export default function ConnectSyncEngine() {
     });
   }, [isPlaying]);
 
-  // 5. Host audio wysyła co 350 ms precyzyjny TICK czasu i stan grania do pilotów
+  // 5. Host rozsyła precyzyjny tick czasu
   useEffect(() => {
     if (!isHost || !isPlaying || !activeRealtimeChannel || !currentTrack) return;
 

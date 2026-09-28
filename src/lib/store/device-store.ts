@@ -68,13 +68,12 @@ export const useDeviceStore = create<DeviceState>()(
           currentId = "dev_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
         }
         const detected = detectDeviceInfo();
-        const activeId = get().activeDeviceId || currentId;
 
         set({
           deviceId: currentId,
           deviceName: detected.name,
           deviceType: detected.type,
-          activeDeviceId: activeId,
+          activeDeviceId: currentId, // Początkowo to urządzenie jest swoim hostem, dopóki sieć nie ustali inaczej
         });
       },
     }),
@@ -85,7 +84,6 @@ export const useDeviceStore = create<DeviceState>()(
         deviceId: state.deviceId,
         deviceName: state.deviceName,
         deviceType: state.deviceType,
-        activeDeviceId: state.activeDeviceId,
         volume: state.volume,
       }),
     }
