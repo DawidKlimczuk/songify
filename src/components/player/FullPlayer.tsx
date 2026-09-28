@@ -58,11 +58,15 @@ export default function FullPlayer() {
   // Stan przeciągania myszą / palcem (Drag & Drop Reorder)
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
   
-  // Stan swipe gestu dla pojedynczego wiersza
+  // Stan swipe gestu z blokadą przewijania pionowego
   const [swipedItem, setSwipedItem] = useState<{
     idx: number;
     startX: number;
+    startY: number;
     currentX: number;
+    isLockedVertical?: boolean;
+    isLockedHorizontal?: boolean;
+    isMouseDown?: boolean;
   } | null>(null);
 
   const [animatingHeart, setAnimatingHeart] = useState(false);
@@ -488,13 +492,26 @@ export default function FullPlayer() {
                 <div className="space-y-1.5">
                   {queue.slice(1).map((track, relativeIdx) => {
                     const actualIdx = relativeIdx + 1;
-                    const isBeingSwiped = swipedItem?.idx === actualIdx;
-                    const offsetX = isBeingSwiped ? swipedItem.currentX - swipedItem.startX : 0;
+                    const isBeingSwiped = swipedItem?.idx === actualIdx && swipedItem.isLockedHorizontal;
+                    const rawDiff = isBeingSwiped ? swipedItem.currentX - swipedItem.startX : 0;
+                    const offsetX = Math.abs(rawDiff) > 10 ? rawDiff : 0;
+
+                    const handleSwipeEnd = () => {
+                      if (swipedItem?.idx === actualIdx && swipedItem.isLockedHorizontal) {
+                        const diff = swipedItem.currentX - swipedItem.startX;
+                        if (diff < -75) {
+                          removeFromQueue(actualIdx);
+                        } else if (diff > 75) {
+                          playNextInQueue(actualIdx);
+                        }
+                      }
+                      setSwipedItem(null);
+                    };
 
                     return (
                       <div
                         key={`${track.id}-${actualIdx}`}
-                        className="relative overflow-hidden rounded-xl bg-[#091013]"
+                        className="group relative overflow-hidden rounded-xl bg-[#091013]"
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => {
                           if (draggedIdx !== null && draggedIdx !== actualIdx) {
@@ -504,7 +521,7 @@ export default function FullPlayer() {
                         }}
                       >
                         {/* TŁO GESTÓW SWIPE */}
-                        {isBeingSwiped && Math.abs(offsetX) > 10 && (
+                        {isBeingSwiped && Math.abs(offsetX) > 8 && (
                           <div
                             className={`absolute inset-0 flex items-center justify-between px-4 z-0 ${
                               offsetX < 0
@@ -512,12 +529,12 @@ export default function FullPlayer() {
                                 : "bg-teal-950 text-teal-400 swipe-action-next"
                             }`}
                           >
-                            <div className="flex items-center gap-1.5 text-xs font-semibold">
+                            <div className="flex items-center gap-1.5 text-xs font-bold">
                               <ListPlus className="h-4 w-4 stroke-[2.5]" />
                               <span>Zagraj jako następny</span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 text-xs font-semibold">
+                            <div className="flex items-center gap-1.5 text-xs font-bold">
                               <span>Usuń</span>
                               <Trash2 className="h-4 w-4 stroke-[2.5]" />
                             </div>
@@ -532,34 +549,75 @@ export default function FullPlayer() {
                             setSwipedItem({
                               idx: actualIdx,
                               startX: e.touches[0].clientX,
+                              startY: e.touches[0].clientY,
                               currentX: e.touches[0].clientX,
+                              isLockedVertical: false,
+                              isLockedHorizontal: false,
                             });
                           }}
                           onTouchMove={(e) => {
-                            if (swipedItem?.idx === actualIdx) {
+                            if (!swipedItem || swipedItem.idx !== actualIdx) return;
+                            if (swipedItem.isLockedVertical) return;
+
+                            const touch = e.touches[0];
+                            const diffX = touch.clientX - swipedItem.startX;
+                            const diffY = touch.clientY - swipedItem.startY;
+
+                            if (!swipedItem.isLockedHorizontal) {
+                              if (Math.abs(diffY) > 10 && Math.abs(diffY) > Math.abs(diffX)) {
+                                setSwipedItem({ ...swipedItem, isLockedVertical: true });
+                                return;
+                              }
+                              if (Math.abs(diffX) > 12 && Math.abs(diffX) > Math.abs(diffY)) {
+                                setSwipedItem({
+                                  ...swipedItem,
+                                  isLockedHorizontal: true,
+                                  currentX: touch.clientX,
+                                });
+                                return;
+                              }
+                              return;
+                            }
+
+                            setSwipedItem({
+                              ...swipedItem,
+                              currentX: touch.clientX,
+                            });
+                          }}
+                          onTouchEnd={handleSwipeEnd}
+                          onMouseDown={(e) => {
+                            if ((e.target as HTMLElement).closest("button") || (e.target as HTMLElement).closest(".drag-handle")) {
+                              return;
+                            }
+                            setSwipedItem({
+                              idx: actualIdx,
+                              startX: e.clientX,
+                              startY: e.clientY,
+                              currentX: e.clientX,
+                              isMouseDown: true,
+                              isLockedHorizontal: true,
+                            });
+                          }}
+                          onMouseMove={(e) => {
+                            if (swipedItem?.idx === actualIdx && swipedItem.isMouseDown) {
                               setSwipedItem({
                                 ...swipedItem,
-                                currentX: e.touches[0].clientX,
+                                currentX: e.clientX,
                               });
                             }
                           }}
-                          onTouchEnd={() => {
-                            if (swipedItem?.idx === actualIdx) {
-                              const diff = swipedItem.currentX - swipedItem.startX;
-                              if (diff < -80) {
-                                removeFromQueue(actualIdx);
-                              } else if (diff > 80) {
-                                playNextInQueue(actualIdx);
-                              }
+                          onMouseUp={handleSwipeEnd}
+                          onMouseLeave={() => {
+                            if (swipedItem?.idx === actualIdx && swipedItem.isMouseDown) {
+                              handleSwipeEnd();
                             }
-                            setSwipedItem(null);
                           }}
                           style={{
                             transform: `translateX(${offsetX}px)`,
                             transition: isBeingSwiped ? "none" : "transform 0.2s ease-out",
                           }}
                           onClick={() => {
-                            if (Math.abs(offsetX) < 10) {
+                            if (Math.abs(offsetX) < 6) {
                               const newQ = queue.slice(actualIdx);
                               setCurrentTrack(track, newQ);
                             }
