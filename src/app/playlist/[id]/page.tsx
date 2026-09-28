@@ -13,6 +13,8 @@ import {
   ArrowDownToLine,
   ArrowRight,
   Loader2,
+  ListPlus,
+  Check,
 } from "lucide-react";
 import { usePlayerStore, Track } from "@/lib/store/player-store";
 import {
@@ -35,7 +37,21 @@ export default function PublicPlaylistPage() {
     toggleShuffle,
     setIsLiked,
     setAddToPlaylistOpen,
+    addToQueue,
   } = usePlayerStore();
+
+  // Stan swipe gestu wyłącznie w prawo (dodawanie do kolejki)
+  const [swipedIdx, setSwipedIdx] = useState<{
+    idx: number;
+    startX: number;
+    startY: number;
+    currentX: number;
+    isLockedVertical?: boolean;
+    isLockedHorizontal?: boolean;
+    isMouseDown?: boolean;
+  } | null>(null);
+
+  const [addedQueueNotice, setAddedQueueNotice] = useState<string | null>(null);
 
   const [playlist, setPlaylist] = useState<{
     id: string;
@@ -242,89 +258,199 @@ export default function PublicPlaylistPage() {
         </button>
       </div>
 
-      {/* Lista utworów */}
+      {/* Pływające powiadomienie o dodaniu do kolejki */}
+      {addedQueueNotice && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-teal-400 px-4 py-2 text-xs font-bold text-black shadow-xl shadow-teal-950/60 animate-in fade-in slide-in-from-top-3 duration-200">
+          <Check className="h-4 w-4 stroke-[3]" />
+          <span>Dodano do kolejki: {addedQueueNotice}</span>
+        </div>
+      )}
+
+      {/* Lista utworów z blokadą osi pionowej i gestem Swipe w prawo */}
       <div className="space-y-2">
         {playlist.tracks.map((song, index) => {
           const isThisTrackPlaying =
             isPlaying && String(currentTrack?.id) === String(song.id);
           const liked = isSongLiked(song);
 
+          const isBeingSwiped = swipedIdx?.idx === index && swipedIdx.isLockedHorizontal;
+          const rawDiff = isBeingSwiped ? swipedIdx.currentX - swipedIdx.startX : 0;
+          // BLOKADA W LEWO: Przesunięcie może być wyłącznie w prawo (> 0)
+          const clampedDiff = Math.max(0, rawDiff);
+          const offsetX = clampedDiff > 10 ? clampedDiff : 0;
+
+          const handleSwipeEnd = () => {
+            if (swipedIdx?.idx === index && swipedIdx.isLockedHorizontal) {
+              const diffX = swipedIdx.currentX - swipedIdx.startX;
+              if (diffX > 75) {
+                // Przeciągnięto wystarczająco daleko -> Dodajemy do kolejki!
+                addToQueue({ ...song, source: playlist.title });
+                setAddedQueueNotice(song.title);
+                setTimeout(() => setAddedQueueNotice(null), 1800);
+              }
+            }
+            setSwipedIdx(null);
+          };
+
           return (
             <div
               key={`${song.id}-${index}`}
-              onClick={() => {
-                const queue = playlist.tracks.map((t) => ({
-                  ...t,
-                  source: playlist.title,
-                }));
-                setCurrentTrack(
-                  { ...song, source: playlist.title },
-                  queue
-                );
-              }}
-              className={`flex items-center justify-between rounded-xl bg-[#0e1619] border p-2.5 active:scale-[0.98] transition cursor-pointer ${
-                isThisTrackPlaying
-                  ? "border-teal-400/80 bg-teal-950/20"
-                  : "border-teal-950/60 hover:border-teal-800/60"
-              }`}
+              className="relative overflow-hidden rounded-xl bg-[#091013]"
             >
-              <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0 pr-2">
-                <span className="w-5 text-center text-xs text-gray-500 font-mono flex-shrink-0">
-                  {index + 1}
-                </span>
-                {song.albumCover ? (
-                  <img
-                    src={song.albumCover}
-                    alt={song.title}
-                    className="h-11 w-11 rounded-lg object-cover flex-shrink-0"
-                  />
-                ) : (
-                  <div className="h-11 w-11 rounded-lg bg-[#162125] flex items-center justify-center flex-shrink-0 border border-teal-950/60">
-                    <Music className="h-5 w-5 text-teal-400/50" />
+              {/* TŁO GESTU: Odsłaniane TYLKO przy przesuwaniu w prawo */}
+              {isBeingSwiped && offsetX > 8 && (
+                <div className="absolute inset-0 flex items-center px-4 bg-teal-950 text-teal-400 swipe-action-next z-0">
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    <ListPlus className="h-4 w-4 stroke-[2.5]" />
+                    <span>Dodaj do kolejki</span>
                   </div>
-                )}
-                <div className="flex flex-col truncate">
-                  <span
-                    className={`truncate text-xs font-bold ${
-                      isThisTrackPlaying ? "text-teal-400" : "text-white"
-                    }`}
-                  >
-                    {song.title}
-                  </span>
-                  <span className="truncate text-[11px] text-gray-400">
-                    {song.artist}
-                  </span>
                 </div>
-              </div>
+              )}
 
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={(e) => handleToggleLike(e, song)}
-                  className={`p-2 transition active:scale-125 ${
-                    liked
-                      ? "text-teal-400"
-                      : "text-gray-500 hover:text-white"
-                  }`}
-                  title={liked ? "Usuń z polubionych" : "Dodaj do polubionych"}
-                >
-                  <Heart
-                    className={`h-4 w-4 ${
-                      liked ? "fill-teal-400" : ""
+              {/* KARTA UTWORU */}
+              <div
+                onTouchStart={(e) => {
+                  setSwipedIdx({
+                    idx: index,
+                    startX: e.touches[0].clientX,
+                    startY: e.touches[0].clientY,
+                    currentX: e.touches[0].clientX,
+                    isLockedVertical: false,
+                    isLockedHorizontal: false,
+                  });
+                }}
+                onTouchMove={(e) => {
+                  if (!swipedIdx || swipedIdx.idx !== index) return;
+                  if (swipedIdx.isLockedVertical) return;
+
+                  const touch = e.touches[0];
+                  const diffX = touch.clientX - swipedIdx.startX;
+                  const diffY = touch.clientY - swipedIdx.startY;
+
+                  // Blokada w lewo: jeśli palec idzie w lewo, nie traktujemy tego jako swipe
+                  if (diffX < 0) return;
+
+                  if (!swipedIdx.isLockedHorizontal) {
+                    if (Math.abs(diffY) > 10 && Math.abs(diffY) > Math.abs(diffX)) {
+                      setSwipedIdx({ ...swipedIdx, isLockedVertical: true });
+                      return;
+                    }
+                    if (diffX > 12 && diffX > Math.abs(diffY)) {
+                      setSwipedIdx({
+                        ...swipedIdx,
+                        isLockedHorizontal: true,
+                        currentX: touch.clientX,
+                      });
+                      return;
+                    }
+                    return;
+                  }
+
+                  setSwipedIdx({
+                    ...swipedIdx,
+                    currentX: touch.clientX,
+                  });
+                }}
+                onTouchEnd={handleSwipeEnd}
+                onMouseDown={(e) => {
+                  if ((e.target as HTMLElement).closest("button")) return;
+                  setSwipedIdx({
+                    idx: index,
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    currentX: e.clientX,
+                    isMouseDown: true,
+                    isLockedHorizontal: true,
+                  });
+                }}
+                onMouseMove={(e) => {
+                  if (swipedIdx?.idx === index && swipedIdx.isMouseDown) {
+                    const diffX = e.clientX - swipedIdx.startX;
+                    if (diffX >= 0) {
+                      setSwipedIdx({
+                        ...swipedIdx,
+                        currentX: e.clientX,
+                      });
+                    }
+                  }
+                }}
+                onMouseUp={handleSwipeEnd}
+                onMouseLeave={() => {
+                  if (swipedIdx?.idx === index && swipedIdx.isMouseDown) {
+                    handleSwipeEnd();
+                  }
+                }}
+                style={{
+                  transform: `translateX(${offsetX}px)`,
+                  transition: isBeingSwiped ? "none" : "transform 0.2s ease-out",
+                }}
+                onClick={() => {
+                  if (offsetX < 6) {
+                    const queue = playlist.tracks.map((t) => ({
+                      ...t,
+                      source: playlist.title,
+                    }));
+                    setCurrentTrack({ ...song, source: playlist.title }, queue);
+                  }
+                }}
+                className={`relative z-10 flex items-center justify-between rounded-xl bg-[#0e1619] border p-2.5 transition cursor-pointer select-none active:scale-[0.99] ${
+                  isThisTrackPlaying
+                    ? "border-teal-400/80 bg-teal-950/20"
+                    : "border-teal-950/60 hover:border-teal-800/60"
+                }`}
+              >
+                <div className="flex items-center gap-3 overflow-hidden flex-1 min-w-0 pr-2">
+                  <span className="w-5 text-center text-xs text-gray-500 font-mono flex-shrink-0">
+                    {index + 1}
+                  </span>
+                  {song.albumCover ? (
+                    <img
+                      src={song.albumCover}
+                      alt={song.title}
+                      className="h-11 w-11 rounded-lg object-cover flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="h-11 w-11 rounded-lg bg-[#162125] flex items-center justify-center flex-shrink-0 border border-teal-950/60">
+                      <Music className="h-5 w-5 text-teal-400/50" />
+                    </div>
+                  )}
+                  <div className="flex flex-col truncate">
+                    <span
+                      className={`truncate text-xs font-bold ${
+                        isThisTrackPlaying ? "text-teal-400" : "text-white"
+                      }`}
+                    >
+                      {song.title}
+                    </span>
+                    <span className="truncate text-[11px] text-gray-400">
+                      {song.artist}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={(e) => handleToggleLike(e, song)}
+                    className={`p-2 transition active:scale-125 ${
+                      liked ? "text-teal-400" : "text-gray-500 hover:text-white"
                     }`}
-                  />
-                </button>
+                    title={liked ? "Usuń z polubionych" : "Dodaj do polubionych"}
+                  >
+                    <Heart className={`h-4 w-4 ${liked ? "fill-teal-400" : ""}`} />
+                  </button>
 
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setCurrentTrack({ ...song, source: playlist.title });
-                    setAddToPlaylistOpen(true);
-                  }}
-                  className="p-2 text-gray-500 hover:text-teal-400 transition active:scale-125"
-                  title="Dodaj do playlisty"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCurrentTrack({ ...song, source: playlist.title });
+                      setAddToPlaylistOpen(true);
+                    }}
+                    className="p-2 text-gray-500 hover:text-teal-400 transition active:scale-125"
+                    title="Dodaj do playlisty"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           );
