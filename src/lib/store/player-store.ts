@@ -154,11 +154,26 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       addToQueue: (track) => {
-        const { queue, originalQueue } = get();
+        const { queue, originalQueue, currentTrack } = get();
         const trackWithId = { ...track, id: String(track.id) };
+
+        // Jeśli kolejka jest pusta, ale gra bieżący utwór, ustawiamy go na indeksie 0
+        let baseQueue = [...queue];
+        if (baseQueue.length === 0 && currentTrack) {
+          baseQueue = [{ ...currentTrack, id: String(currentTrack.id) }];
+        }
+
+        // Wstawiamy nowy utwór zaraz na pozycję 1 (jako następny do odtworzenia)
+        // Dzięki temu od razu widać go na samej górze sekcji "Następne w kolejce"!
+        if (baseQueue.length > 0) {
+          baseQueue.splice(1, 0, trackWithId);
+        } else {
+          baseQueue = [trackWithId];
+        }
+
         set({
-          queue: [...queue, trackWithId],
-          originalQueue: [...originalQueue, trackWithId],
+          queue: baseQueue,
+          originalQueue: [trackWithId, ...originalQueue],
         });
       },
 
