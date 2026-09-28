@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { usePlayerStore } from "@/lib/store/player-store";
+import { useDeviceStore } from "@/lib/store/device-store";
 
 declare global {
   interface Window {
@@ -36,6 +37,10 @@ export default function AudioEngine() {
     sleepTimerMode,
     setSleepTimer,
   } = usePlayerStore();
+
+  // Sprawdzamy, czy to urządzenie jest wybranym hostem audio
+  const { deviceId, activeDeviceId, volume } = useDeviceStore();
+  const isAudioHost = !activeDeviceId || activeDeviceId === "" || deviceId === activeDeviceId;
 
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
@@ -145,7 +150,7 @@ export default function AudioEngine() {
               width: "1",
               videoId: data.videoId,
               playerVars: {
-                autoplay: isPlaying ? 1 : 0,
+                autoplay: 1,
                 controls: 0,
                 disablekb: 1,
                 fs: 0,
@@ -157,20 +162,25 @@ export default function AudioEngine() {
                   isReadyRef.current = true;
                   setIsLoadingAudio(false);
 
+                  try {
+                    event.target.setVolume(volume);
+                  } catch {}
+
                   if (initialTime > 0) {
                     event.target.seekTo(initialTime, true);
                   }
 
-                  // Odtwarzamy TYLKO jeśli użytkownik faktycznie chciał odtworzyć
-                  if (isPlaying) {
+                  if (isAudioHost) {
+                    setIsPlaying(true);
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
                     event.target.pauseVideo();
-                    setIsPlaying(false);
                   }
                 },
                 onStateChange: (event: any) => {
+                  if (!isAudioHost) return;
+
                   if (event.data === 1) {
                     // PLAYING
                     setIsPlaying(true);
@@ -183,9 +193,11 @@ export default function AudioEngine() {
                       }
                     }
                   } else if (event.data === 2) {
-                    // PAUSED
-                    setIsPlaying(false);
-                    silentAudioRef.current?.pause();
+                    // PAUSED - reagujemy tylko jeśli to nie jest faza początkowego buforowania
+                    if (isReadyRef.current) {
+                      setIsPlaying(false);
+                      silentAudioRef.current?.pause();
+                    }
                   } else if (event.data === 0) {
                     // Sprawdzamy czy był aktywny tryb uśpienia na koniec utworu
                     const currentMode = usePlayerStore.getState().sleepTimerMode;
@@ -216,13 +228,14 @@ export default function AudioEngine() {
             });
           } else {
             // Player już istnieje
-            if (isPlaying) {
+            if (isAudioHost) {
               playerRef.current.loadVideoById({
                 videoId: data.videoId,
                 startSeconds: initialTime,
               });
               playerRef.current.playVideo();
               silentAudioRef.current?.play().catch(() => {});
+              setIsPlaying(true);
             } else {
               playerRef.current.cueVideoById({
                 videoId: data.videoId,
@@ -277,7 +290,7 @@ export default function AudioEngine() {
     if (!isReadyRef.current || !playerRef.current) return;
 
     try {
-      if (isPlaying) {
+      if (isPlaying && isAudioHost) {
         if (typeof playerRef.current.playVideo === "function") {
           playerRef.current.playVideo();
           silentAudioRef.current?.play().catch(() => {});
@@ -295,7 +308,7 @@ export default function AudioEngine() {
     if (typeof window !== "undefined" && "mediaSession" in navigator) {
       navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
     }
-  }, [isPlaying]);
+  }, [isPlaying, isAudioHost]);
 
   // 5. Przewijanie (Seek)
   useEffect(() => {
@@ -313,7 +326,8 @@ export default function AudioEngine() {
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
 
-    if (isPlaying) {
+    // Aktualizujemy czas ze strumienia Iframe TYLKO na urządzeniu, które faktycznie gra dźwięk
+    if (isPlaying && isAudioHost) {
       timerRef.current = setInterval(() => {
         if (
           isReadyRef.current &&
@@ -321,7 +335,7 @@ export default function AudioEngine() {
           typeof playerRef.current.getCurrentTime === "function"
         ) {
           const cur = playerRef.current.getCurrentTime();
-          if (typeof cur === "number" && !isNaN(cur)) {
+          if (typeof cur === "number" && !isNaN(cur) && cur > 0) {
             setCurrentTime(cur);
           }
 
@@ -357,7 +371,7 @@ export default function AudioEngine() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPlaying, duration, setCurrentTime, setDuration]);
+  }, [isPlaying, isAudioHost, duration, setCurrentTime, setDuration]);
 
   // 7. Obsługa Sleep Timera (płynny Fade-out i automatyczna pauza)
   useEffect(() => {
@@ -392,6 +406,73 @@ export default function AudioEngine() {
 
     return () => clearInterval(interval);
   }, [sleepTimerEndsAt, sleepTimerMode, setIsPlaying, setSleepTimer]);
+
+  // 8. Czysty Handoff bez nakładania się dźwięku i przycinek
+  useEffect(() => {
+    if (!isAudioHost) {
+      // Błyskawiczne ucięcie dźwięku: natychmiastowe mute + pauza, aby nie nachodziło na nowe urządzenie
+      try {
+        if (playerRef.current) {
+          if (typeof playerRef.current.setVolume === "function") {
+            playerRef.current.setVolume(0);
+          }
+          if (typeof playerRef.current.pauseVideo === "function") {
+            playerRef.current.pauseVideo();
+          }
+        }
+        silentAudioRef.current?.pause();
+      } catch {}
+      return;
+    }
+
+    // Nowy host przejmuje strumień
+    const exactSec = usePlayerStore.getState().currentTime || 0;
+    let hasSeeked = false;
+
+    const startHostPlayback = () => {
+      if (!playerRef.current || hasSeeked) return;
+      hasSeeked = true;
+
+      try {
+        // Przywracamy właściwą głośność dla tego urządzenia
+        if (typeof playerRef.current.setVolume === "function") {
+          playerRef.current.setVolume(volume);
+        }
+        // Jednorazowy seek do dokładnej pozycji (bez dublowania)
+        if (exactSec > 0 && typeof playerRef.current.seekTo === "function") {
+          playerRef.current.seekTo(exactSec, true);
+        }
+        if (typeof playerRef.current.playVideo === "function") {
+          playerRef.current.playVideo();
+        }
+        silentAudioRef.current?.play().catch(() => {});
+        setIsPlaying(true);
+      } catch (err) {
+        console.warn("Błąd wznowienia na nowym hoście:", err);
+      }
+    };
+
+    if (isReadyRef.current) {
+      startHostPlayback();
+    } else {
+      const checkInterval = setInterval(() => {
+        if (isReadyRef.current) {
+          clearInterval(checkInterval);
+          startHostPlayback();
+        }
+      }, 50);
+      return () => clearInterval(checkInterval);
+    }
+  }, [isAudioHost, volume, setIsPlaying]);
+
+  // 9. Synchronizacja głośności odtwarzacza
+  useEffect(() => {
+    if (playerRef.current && typeof playerRef.current.setVolume === "function" && isAudioHost) {
+      try {
+        playerRef.current.setVolume(volume);
+      } catch {}
+    }
+  }, [volume, isAudioHost]);
 
   return (
     <div className="fixed -top-96 -left-96 h-1 w-1 opacity-0 pointer-events-none overflow-hidden">

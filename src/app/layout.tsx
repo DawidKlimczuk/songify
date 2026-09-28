@@ -6,6 +6,7 @@ import BottomNav from "@/components/navigation/BottomNav";
 import MiniPlayer from "@/components/player/MiniPlayer";
 import FullPlayer from "@/components/player/FullPlayer";
 import AudioEngine from "@/components/player/AudioEngine";
+import ConnectSyncEngine from "@/components/player/ConnectSyncEngine";
 import AddToPlaylistModal from "@/components/player/AddToPlaylistModal";
 import PwaRegister from "@/components/PwaRegister";
 import InstallPrompt from "@/components/InstallPrompt";
@@ -68,6 +69,7 @@ export default function RootLayout({
         <InstallPrompt />
         <div className="mx-auto flex min-h-screen max-w-md flex-col relative overflow-hidden">
           <AudioEngine />
+          <ConnectSyncEngine />
           {children}
           <FullPlayer />
           <AddToPlaylistModal />

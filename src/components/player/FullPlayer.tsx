@@ -26,7 +26,10 @@ import {
   ListPlus,
   Volume2,
   Moon,
+  Laptop,
 } from "lucide-react";
+import { useDeviceStore } from "@/lib/store/device-store";
+import DevicePickerModal from "./DevicePickerModal";
 
 export default function FullPlayer() {
   const {
@@ -58,6 +61,9 @@ export default function FullPlayer() {
     sleepTimerMode,
     setSleepTimer,
   } = usePlayerStore();
+
+  const { setDevicePickerOpen, activeDeviceId, deviceId } = useDeviceStore();
+  const isPlayingRemotely = Boolean(activeDeviceId && activeDeviceId !== deviceId);
 
   const [isSleepModalOpen, setIsSleepModalOpen] = useState(false);
   const [remainingTimerText, setRemainingTimerText] = useState<string | null>(null);
@@ -388,7 +394,7 @@ export default function FullPlayer() {
           </button>
         </div>
 
-        {/* Dolny pasek akcji: 4 czyste, równe ikony bez zbędnych ramek i rozdzielaczy */}
+        {/* Dolny pasek akcji: 5 czystych, równych ikon ze Spotify Connect */}
         <div className="flex items-center justify-between px-3 pt-2">
           {/* Przycisk Kolejki Odtwarzania */}
           <button
@@ -401,6 +407,19 @@ export default function FullPlayer() {
             title="Kolejka odtwarzania"
           >
             <ListMusic className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
+          </button>
+
+          {/* Przycisk Urządzenia (Songify Connect) */}
+          <button
+            onClick={() => setDevicePickerOpen(true)}
+            className={`p-2 transition active:scale-90 ${
+              isPlayingRemotely
+                ? "text-teal-400 animate-pulse [html.light_&]:!text-[#db2777]"
+                : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
+            }`}
+            title="Wybierz urządzenie do odtwarzania"
+          >
+            <Laptop className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
           </button>
 
           {/* Przycisk Dodaj do playlisty (otwiera modal wyboru playlist) */}
@@ -830,6 +849,9 @@ export default function FullPlayer() {
           </div>
         </div>
       )}
+
+      {/* Modal wyboru urządzenia (Songify Connect) */}
+      <DevicePickerModal />
     </div>
   );
 }

@@ -464,3 +464,32 @@ html.light .swipe-action-next svg,
 html.light .swipe-action-next span {
   color: #9f1239 !important;
 }
+
+/* ========================================================
+   SLEEP TIMER W TRYBIE LIGHT
+   ======================================================== */
+html.light .sleep-timer-modal {
+  background-color: #ffffff !important;
+  border-color: #fbcfe8 !important;
+  color: #5c0612 !important;
+  box-shadow: 0 20px 25px -5px rgba(244, 114, 182, 0.2), 0 8px 10px -6px rgba(244, 114, 182, 0.2) !important;
+}
+
+html.light .sleep-timer-modal h3,
+html.light .sleep-timer-modal span,
+html.light .sleep-timer-modal p {
+  color: #5c0612 !important;
+}
+
+html.light .sleep-timer-modal button:not(.sleep-timer-confirm):not(.sleep-timer-cancel) {
+  color: #9f1239 !important;
+}
+
+html.light .sleep-timer-modal button:hover {
+  background-color: #fdf2f8 !important;
+}
+
+html.light .sleep-timer-wheel-center {
+  border-color: #f472b6 !important;
+  background-color: rgba(244, 114, 182, 0.08) !important;
+}
