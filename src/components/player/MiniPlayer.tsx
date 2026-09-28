@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Play, Pause, Heart, SkipBack, SkipForward } from "lucide-react";
+import { Play, Pause, Heart, SkipBack, SkipForward, Music } from "lucide-react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import { toggleLikeTrack, isTrackLiked } from "@/app/actions/playlist";
 
@@ -77,11 +77,17 @@ export default function MiniPlayer() {
       <div className="flex items-center justify-between gap-2">
         {/* Okładka + Tytuł i Wykonawca */}
         <div className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
-          <img
-            src={currentTrack.albumCover}
-            alt={currentTrack.title}
-            className="h-10 w-10 flex-shrink-0 rounded-xl object-cover border border-teal-900/40"
-          />
+          {currentTrack.albumCover ? (
+              <img
+                src={currentTrack.albumCover}
+                alt={currentTrack.title}
+                className="h-10 w-10 flex-shrink-0 rounded-xl object-cover border border-teal-900/40"
+              />
+            ) : (
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#162125] border border-teal-900/40">
+                <Music className="h-5 w-5 text-teal-400/50" />
+              </div>
+            )}
           <div className="flex min-w-0 flex-col truncate">
             <span className="truncate text-xs font-bold text-white">
               {currentTrack.title}

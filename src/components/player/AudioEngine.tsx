@@ -15,6 +15,7 @@ export default function AudioEngine() {
   const isReadyRef = useRef(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const activeTrackIdRef = useRef<string | null>(null);
+  const isInitialMountRef = useRef<boolean>(true);
   const silentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
@@ -33,11 +34,10 @@ export default function AudioEngine() {
     previousTrack,
   } = usePlayerStore();
 
-  // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla tła na Androidzie
+  // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // Silent Audio Anchor - niesłyszalny plik WAV w pętli podtrzymujący proces w tle
     const audio = new Audio(
       "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"
     );
@@ -56,7 +56,7 @@ export default function AudioEngine() {
     }
   }, []);
 
-  // 2. Obsługa MediaSession API (Globalne akcje odtwarzacza dla Android/iOS/Dynamic Island)
+  // 2. Obsługa MediaSession API
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
 
@@ -94,11 +94,16 @@ export default function AudioEngine() {
     });
   }, [nextTrack, previousTrack, setIsPlaying, setCurrentTime]);
 
-  // 3. Ładowanie i strumieniowanie utworu
+  // 3. Ładowanie utworu i obsługa startu / wznawiania
   useEffect(() => {
     if (!currentTrack || !currentTrack.artist || !currentTrack.title) return;
 
-    const isDifferentTrack = activeTrackIdRef.current !== currentTrack.id;
+    const abortController = new AbortController();
+    const isFirstAppLoad = isInitialMountRef.current;
+    isInitialMountRef.current = false;
+
+    // Utwór jest zmieniony tylko wtedy, gdy to nie pierwsze wejście i ID się faktycznie różni
+    const isDifferentTrack = !isFirstAppLoad && activeTrackIdRef.current !== currentTrack.id;
     activeTrackIdRef.current = currentTrack.id;
 
     if (isDifferentTrack && isReadyRef.current && playerRef.current) {
@@ -107,35 +112,37 @@ export default function AudioEngine() {
           playerRef.current.stopVideo();
         }
       } catch (err) {
-        console.warn("Błąd zatrzymywania starego utworu:", err);
+        console.warn("Błąd zatrzymywania poprzedniego utworu:", err);
       }
     }
 
     setIsLoadingAudio(true);
-    let isCancelled = false;
 
     const query = `${currentTrack.artist} - ${currentTrack.title}`;
 
-    fetch(`/api/audio/stream?q=${encodeURIComponent(query)}`)
+    fetch(`/api/audio/stream?q=${encodeURIComponent(query)}`, {
+      signal: abortController.signal,
+    })
       .then((res) => {
         if (!res.ok) throw new Error("Błąd pobierania stream ID");
         return res.json();
       })
       .then((data) => {
-        if (isCancelled || !data.videoId) return;
+        if (abortController.signal.aborted || !data?.videoId) return;
 
         setAudioData(data.youtubeUrl);
 
-        const launchPlayer = () => {
-          const initialTime = isDifferentTrack ? 0 : Math.floor(currentTime || 0);
+        // Jeśli to wejście do aplikacji z zapisanym stanem, startujemy od zapisanego czasu, a nie od 0
+        const initialTime = isDifferentTrack ? 0 : Math.floor(currentTime || 0);
 
+        const launchPlayer = () => {
           if (!playerRef.current) {
             playerRef.current = new window.YT.Player("songify-hidden-player", {
               height: "1",
               width: "1",
               videoId: data.videoId,
               playerVars: {
-                autoplay: 1,
+                autoplay: isPlaying ? 1 : 0,
                 controls: 0,
                 disablekb: 1,
                 fs: 0,
@@ -145,10 +152,20 @@ export default function AudioEngine() {
               events: {
                 onReady: (event: any) => {
                   isReadyRef.current = true;
-                  event.target.playVideo();
-                  silentAudioRef.current?.play().catch(() => {});
-                  setIsPlaying(true);
                   setIsLoadingAudio(false);
+
+                  if (initialTime > 0) {
+                    event.target.seekTo(initialTime, true);
+                  }
+
+                  // Odtwarzamy TYLKO jeśli użytkownik faktycznie chciał odtworzyć
+                  if (isPlaying) {
+                    event.target.playVideo();
+                    silentAudioRef.current?.play().catch(() => {});
+                  } else {
+                    event.target.pauseVideo();
+                    setIsPlaying(false);
+                  }
                 },
                 onStateChange: (event: any) => {
                   if (event.data === 1) {
@@ -162,14 +179,18 @@ export default function AudioEngine() {
                         setDuration(ytDur);
                       }
                     }
+                  } else if (event.data === 2) {
+                    // PAUSED
+                    setIsPlaying(false);
+                    silentAudioRef.current?.pause();
                   } else if (event.data === 0) {
                     // ENDED -> autoodtwarzanie następnego
                     try {
                       playerRef.current?.stopVideo?.();
                     } catch {}
                     nextTrack();
-                  } else if (event.data === 2) {
-                    // PAUSED
+                  } else if (event.data === 3) {
+                    // BUFFERING
                   }
                 },
                 onError: () => {
@@ -179,13 +200,21 @@ export default function AudioEngine() {
               },
             });
           } else {
-            playerRef.current.loadVideoById({
-              videoId: data.videoId,
-              startSeconds: initialTime,
-            });
-            playerRef.current.playVideo();
-            silentAudioRef.current?.play().catch(() => {});
-            setIsPlaying(true);
+            // Player już istnieje
+            if (isPlaying) {
+              playerRef.current.loadVideoById({
+                videoId: data.videoId,
+                startSeconds: initialTime,
+              });
+              playerRef.current.playVideo();
+              silentAudioRef.current?.play().catch(() => {});
+            } else {
+              playerRef.current.cueVideoById({
+                videoId: data.videoId,
+                startSeconds: initialTime,
+              });
+              setIsLoadingAudio(false);
+            }
           }
         };
 
@@ -196,42 +225,53 @@ export default function AudioEngine() {
         }
       })
       .catch((err) => {
-        console.error("Błąd ładowania streamu:", err);
+        if (err.name === "AbortError") {
+          return; // Ciche ignorowanie przerwanego zapytania
+        }
+        console.warn("Błąd ładowania streamu:", err.message || err);
         setIsLoadingAudio(false);
       });
 
-    // Przekazanie metadanych utworu do MediaSession
+    // Przekazanie metadanych utworu do MediaSession (tylko gdy jest prawidłowa okładka)
     if (typeof window !== "undefined" && "mediaSession" in navigator) {
+      const artworkList = currentTrack.albumCover
+        ? [
+            {
+              src: currentTrack.albumCover,
+              sizes: "512x512",
+              type: "image/jpeg",
+            },
+          ]
+        : [];
+
       navigator.mediaSession.metadata = new MediaMetadata({
         title: currentTrack.title,
         artist: currentTrack.artist,
         album: currentTrack.source || "Songify",
-        artwork: [
-          {
-            src: currentTrack.albumCover,
-            sizes: "512x512",
-            type: "image/jpeg",
-          },
-        ],
+        artwork: artworkList,
       });
     }
 
     return () => {
-      isCancelled = true;
+      abortController.abort();
     };
   }, [currentTrack?.id]);
 
-  // 4. Synchronizacja stanu Play / Pause z MediaSession i kotwicą audio
+  // 4. Obsługa kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
     if (!isReadyRef.current || !playerRef.current) return;
 
     try {
-      if (isPlaying && typeof playerRef.current.playVideo === "function") {
-        playerRef.current.playVideo();
-        silentAudioRef.current?.play().catch(() => {});
-      } else if (!isPlaying && typeof playerRef.current.pauseVideo === "function") {
-        playerRef.current.pauseVideo();
-        silentAudioRef.current?.pause();
+      if (isPlaying) {
+        if (typeof playerRef.current.playVideo === "function") {
+          playerRef.current.playVideo();
+          silentAudioRef.current?.play().catch(() => {});
+        }
+      } else {
+        if (typeof playerRef.current.pauseVideo === "function") {
+          playerRef.current.pauseVideo();
+          silentAudioRef.current?.pause();
+        }
       }
     } catch (err) {
       console.warn("Błąd toggle play/pause:", err);
@@ -242,7 +282,7 @@ export default function AudioEngine() {
     }
   }, [isPlaying]);
 
-  // 5. Przewijanie (Seek) z poziomu aplikacji
+  // 5. Przewijanie (Seek)
   useEffect(() => {
     if (
       seekTarget !== null &&
@@ -254,7 +294,7 @@ export default function AudioEngine() {
     }
   }, [seekTarget, resetSeek]);
 
-  // 6. Pętla synchronizacji pozycji i paska postępu na ekranie blokady
+  // 6. Pętla synchronizacji pozycji i paska postępu
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
 
@@ -266,7 +306,9 @@ export default function AudioEngine() {
           typeof playerRef.current.getCurrentTime === "function"
         ) {
           const cur = playerRef.current.getCurrentTime();
-          setCurrentTime(cur);
+          if (typeof cur === "number" && !isNaN(cur)) {
+            setCurrentTime(cur);
+          }
 
           let currentDuration = duration;
           if (typeof playerRef.current.getDuration === "function") {

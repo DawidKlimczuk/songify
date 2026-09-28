@@ -296,3 +296,161 @@ html.light img[class*="shadow-"] {
 html.light div[class*="blur-"][class*="bg-teal-"] {
   background-color: rgba(244, 114, 182, 0.25) !important;
 }
+
+/* ========================================================
+   POPRAWKI DESIGNU LIGHT (SONGIFY, PASEK I PLAYLISTY)
+   ======================================================== */
+
+/* 1. Usunięcie zielonej poświaty/chmurki za logo SONGIFY */
+html.light header div[class*="bg-teal"],
+html.light header div[class*="bg-emerald"],
+html.light header div[class*="blur-"],
+html.light .font-drip ~ div[class*="blur-"],
+html.light div:has(> .font-drip) div[class*="blur-"] {
+  background-color: rgba(244, 114, 182, 0.35) !important;
+  display: none !important; /* Całkowite odcięcie zielonej plamy ambientu */
+}
+
+html.light .font-drip {
+  color: #5c0612 !important; /* Ciemny burgund jak Drive */
+  filter: drop-shadow(0 0 12px rgba(244, 114, 182, 0.45)) !important;
+  text-shadow: none !important;
+}
+
+/* 2. Pasek postępu - szyna tła w głębokim ciemnym burgundzie (kolor napisu Drive) */
+html.light div[class*="fixed bottom-"] div[class*="rounded-full"][class*="bg-"],
+html.light div[class*="fixed inset-0"] div[class*="rounded-full"][class*="bg-gray-"],
+html.light div[class*="fixed inset-0"] div[class*="rounded-full"][class*="bg-slate-"],
+html.light div[class*="fixed inset-0"] div[class*="rounded-full"][class*="bg-zinc-"],
+html.light div[class*="fixed inset-0"] div[class*="rounded-full"][class*="bg-white/"],
+html.light div[class*="fixed inset-0"] div[class*="rounded-full"][class*="bg-black/"] {
+  background-color: #5c0612 !important; /* Głęboki burgund */
+}
+
+/* Różowy odcinek postępu (dotychczas zagrany) oraz suwak kropki */
+html.light div[class*="fixed inset-0"] div[class*="bg-pink-500"][class*="rounded-full"],
+html.light div[class*="fixed inset-0"] div[class*="bg-teal-400"][class*="rounded-full"] {
+  background-color: #f472b6 !important;
+}
+
+/* 3. Identyczny gradient dla tworzonych playlist (1:1 jak Polubione) */
+html.light div[class*="aspect-square"][class*="bg-"] {
+  background-image: linear-gradient(135deg, #f472b6 0%, #fb7185 50%, #fda4af 100%) !important;
+  background-color: transparent !important;
+  border-color: #fbcfe8 !important;
+}
+
+/* Ikona nutki w kafelku playlisty */
+html.light div[class*="aspect-square"] svg {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+  fill: transparent !important;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+}
+
+/* 1. Przycisk trzech kropek (Screen 1): białe tło i bordowe kropki zamiast ciemnego grafitu */
+html.light button.rounded-full:has(.lucide-more-vertical),
+html.light button.rounded-full:has(.lucide-ellipsis-vertical),
+html.light button.rounded-full:has(.lucide-more-horizontal) {
+  background-color: #ffffff !important;
+  border: 1px solid #fbcfe8 !important;
+}
+
+html.light button.rounded-full:has(.lucide-more-vertical) svg,
+html.light button.rounded-full:has(.lucide-ellipsis-vertical) svg,
+html.light button.rounded-full:has(.lucide-more-horizontal) svg {
+  color: #9f1239 !important;
+}
+
+/* 2. Logo Songify (Screen 2): usunięcie zielonej chmury ambientu za napisem */
+html.light header .blur-2xl,
+html.light header .blur-xl,
+html.light header .blur-3xl {
+  display: none !important;
+}
+
+/* 3. Wyszukiwarka: usunięcie kwadratowej ramki i zachowanie zaokrąglonego obrysu */
+html.light div:has(> input:focus),
+html.light form:has(input:focus) {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+html.light input:focus-visible,
+html.light input:focus {
+  outline: none !important;
+  border-color: #f472b6 !important;
+  border-radius: 9999px !important;
+  box-shadow: 0 0 0 2px rgba(244, 114, 182, 0.4) !important;
+}
+
+/* 4. Lista utworów (Screen 4): zamiana zielonego przycisku Play na różowy */
+html.light li button[class*="bg-teal"],
+html.light li div[class*="bg-teal"],
+html.light div[class*="group"] button[class*="bg-teal"],
+html.light div[class*="group"] div[class*="bg-teal"] {
+  background-color: #f472b6 !important;
+}
+
+html.light li button[class*="bg-teal"] svg,
+html.light li div[class*="bg-teal"] svg,
+html.light div[class*="group"] button[class*="bg-teal"] svg,
+html.light div[class*="group"] div[class*="bg-teal"] svg {
+  color: #ffffff !important;
+  fill: #ffffff !important;
+}
+
+/* ========================================================
+   KOLEJKA I SHUFFLE W TRYBIE LIGHT
+   ======================================================== */
+
+/* Tło i nagłówek modala kolejki w trybie jasnym */
+html.light div[class*="fixed inset-0"][class*="z-50"] {
+  background-color: #fff5f7 !important;
+  color: #5c0612 !important;
+}
+
+/* Przycisk zamknięcia X w kolejce */
+html.light div[class*="fixed inset-0"][class*="z-50"] button:has(.lucide-x) {
+  background-color: #ffffff !important;
+  border-color: #fbcfe8 !important;
+  color: #9f1239 !important;
+}
+
+html.light div[class*="fixed inset-0"][class*="z-50"] button:has(.lucide-x) svg {
+  color: #9f1239 !important;
+}
+
+/* Kafelek 'Teraz odtwarzane' w kolejce */
+html.light div[class*="fixed inset-0"][class*="z-50"] div[class*="shadow-lg"] {
+  background-color: #ffffff !important;
+  border-color: #f472b6 !important;
+}
+
+/* Kafelki utworów na liście kolejki */
+html.light div[class*="fixed inset-0"][class*="z-50"] div[class*="rounded-xl"][class*="bg-\[\#0e1619\]"],
+html.light div[class*="fixed inset-0"][class*="z-50"] div[class*="rounded-xl"][class*="bg-\[\#122125\]"],
+html.light div[class*="fixed inset-0"][class*="z-50"] div[class*="rounded-xl"]:has(.lucide-grip-vertical) {
+  background-color: #ffffff !important;
+  border-color: #fbcfe8 !important;
+  box-shadow: 0 1px 3px rgba(244, 114, 182, 0.1) !important;
+}
+
+/* Tytuły piosenek w kolejce - mocne bordo zamiast bieli */
+html.light div[class*="fixed inset-0"][class*="z-50"] span[class*="font-semibold"],
+html.light div[class*="fixed inset-0"][class*="z-50"] span[class*="font-bold"] {
+  color: #5c0612 !important;
+}
+
+/* Wykonawcy i numery w kolejce */
+html.light div[class*="fixed inset-0"][class*="z-50"] span[class*="text-gray-400"],
+html.light div[class*="fixed inset-0"][class*="z-50"] span[class*="text-gray-500"] {
+  color: #9f1239 !important;
+}
+
+/* Chwytak do przesuwania w kolejce */
+html.light div[class*="fixed inset-0"][class*="z-50"] svg.lucide-grip-vertical {
+  color: #db2777 !important;
+}
+

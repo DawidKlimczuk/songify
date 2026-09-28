@@ -10,6 +10,8 @@ import {
   Music,
   Heart,
   Plus,
+  ArrowDownToLine,
+  ArrowRight,
   Loader2,
 } from "lucide-react";
 import { usePlayerStore, Track } from "@/lib/store/player-store";
@@ -43,11 +45,9 @@ export default function PublicPlaylistPage() {
   } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // ID playlisty "Polubione utwory" oraz zbiór polubionych tytułów/ID dla szybkiego lookupu
   const [likedPlaylistId, setLikedPlaylistId] = useState<string | null>(null);
   const [likedSongKeys, setLikedSongKeys] = useState<Set<string>>(new Set());
 
-  // Pobieranie playlisty oraz aktualnych polubionych utworów użytkownika
   useEffect(() => {
     if (!playlistId) return;
 
@@ -66,7 +66,6 @@ export default function PublicPlaylistPage() {
           setLikedPlaylistId(likedData.id);
           const keys = new Set<string>();
           (likedData as any).songs?.forEach((item: any) => {
-            // Indeksujemy po unikalnym kluczu "tytuł_artysta" dla pewności między Deezerem a bazą
             const key = `${item.song.title.toLowerCase().trim()}_${item.song.artist.toLowerCase().trim()}`;
             keys.add(key);
             keys.add(String(item.song.id));
@@ -95,7 +94,6 @@ export default function PublicPlaylistPage() {
     const key = `${song.title.toLowerCase().trim()}_${song.artist.toLowerCase().trim()}`;
     const currentlyLiked = isSongLiked(song);
 
-    // Optymistyczna zmiana w UI
     const updated = new Set(likedSongKeys);
     if (currentlyLiked) {
       updated.delete(key);
@@ -124,7 +122,6 @@ export default function PublicPlaylistPage() {
       }
     } catch (err) {
       console.error("Błąd aktualizacji polubienia:", err);
-      // Rollback przy błędzie
       setLikedSongKeys(likedSongKeys);
     }
   };
@@ -155,10 +152,10 @@ export default function PublicPlaylistPage() {
   const isPlayingThisPlaylist =
     isPlaying && currentTrack?.source === playlist.title;
 
-  const handlePlayAll = (startRandom: boolean = false) => {
+  const handlePlayAll = () => {
     if (playlist.tracks.length === 0) return;
 
-    if (!startRandom && currentTrack?.source === playlist.title) {
+    if (currentTrack?.source === playlist.title) {
       togglePlay();
       return;
     }
@@ -168,13 +165,11 @@ export default function PublicPlaylistPage() {
       source: playlist.title,
     }));
 
-    if (startRandom) {
-      if (!isShuffle) toggleShuffle();
-      const randomIndex = Math.floor(Math.random() * queue.length);
-      setCurrentTrack(queue[randomIndex], queue);
-    } else {
-      setCurrentTrack(queue[0], queue);
-    }
+    setCurrentTrack(queue[0], queue);
+  };
+
+  const handleTogglePlaylistShuffle = () => {
+    toggleShuffle();
   };
 
   return (
@@ -189,7 +184,7 @@ export default function PublicPlaylistPage() {
           <span>Wróć</span>
         </button>
         <span className="text-xs font-semibold text-teal-400 uppercase tracking-widest">
-          Deezer Playlist
+          Songify Playlist
         </span>
         <div className="w-10" />
       </div>
@@ -213,10 +208,18 @@ export default function PublicPlaylistPage() {
         </p>
       </div>
 
-      {/* Kontrolki Odtwarzania */}
+      {/* Kontrolki Odtwarzania: Pobierz | Play/Pause | Shuffle */}
       <div className="flex items-center justify-center gap-6 mb-6 px-4">
         <button
-          onClick={() => handlePlayAll(false)}
+          onClick={() => {}}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-[#0e1619] border border-teal-900/40 text-gray-400 hover:text-white transition active:scale-95"
+          title="Pobierz playlistę"
+        >
+          <ArrowDownToLine className="h-5 w-5" />
+        </button>
+
+        <button
+          onClick={handlePlayAll}
           className="flex h-14 w-14 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/20 hover:scale-105 active:scale-95 transition"
         >
           {isPlayingThisPlaylist ? (
@@ -227,15 +230,15 @@ export default function PublicPlaylistPage() {
         </button>
 
         <button
-          onClick={() => handlePlayAll(true)}
-          className={`flex h-11 w-11 items-center justify-center rounded-full bg-[#0e1619] border border-teal-900/40 transition active:scale-95 ${
-            isShuffle
-              ? "text-teal-400 border-teal-500/40"
-              : "text-gray-400 hover:text-white"
-          }`}
-          title="Odtwarzaj losowo"
+          onClick={handleTogglePlaylistShuffle}
+          className="flex h-11 w-11 items-center justify-center rounded-full border border-teal-900/40 bg-[#0e1619] text-teal-400 hover:text-white hover:border-teal-500/50 transition active:scale-95 shadow-sm"
+          title={isShuffle ? "Tryb: Odtwarzanie losowe" : "Tryb: Odtwarzanie po kolei"}
         >
-          <Shuffle className="h-5 w-5" />
+          {isShuffle ? (
+            <Shuffle className="h-5 w-5 stroke-[2.2]" />
+          ) : (
+            <ArrowRight className="h-5 w-5 stroke-[2.2]" />
+          )}
         </button>
       </div>
 
@@ -269,11 +272,17 @@ export default function PublicPlaylistPage() {
                 <span className="w-5 text-center text-xs text-gray-500 font-mono flex-shrink-0">
                   {index + 1}
                 </span>
-                <img
-                  src={song.albumCover}
-                  alt={song.title}
-                  className="h-11 w-11 rounded-lg object-cover flex-shrink-0"
-                />
+                {song.albumCover ? (
+                  <img
+                    src={song.albumCover}
+                    alt={song.title}
+                    className="h-11 w-11 rounded-lg object-cover flex-shrink-0"
+                  />
+                ) : (
+                  <div className="h-11 w-11 rounded-lg bg-[#162125] flex items-center justify-center flex-shrink-0 border border-teal-950/60">
+                    <Music className="h-5 w-5 text-teal-400/50" />
+                  </div>
+                )}
                 <div className="flex flex-col truncate">
                   <span
                     className={`truncate text-xs font-bold ${
@@ -288,7 +297,6 @@ export default function PublicPlaylistPage() {
                 </div>
               </div>
 
-              {/* Przyciski Akcji: Serduszko (Polubione) oraz Plus (Dodaj do playlisty) */}
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   onClick={(e) => handleToggleLike(e, song)}

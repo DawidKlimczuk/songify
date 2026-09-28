@@ -13,12 +13,14 @@ export interface Track {
 interface PlayerState {
   currentTrack: Track | null;
   queue: Track[];
+  originalQueue: Track[];
   history: Track[];
-  radioSeedArtist: string | null; // <-- Pamięć głównego artysty stacji radiowej
+  radioSeedArtist: string | null;
   isPlaying: boolean;
   isPlayerExpanded: boolean;
   isLiked: boolean;
   isShuffle: boolean;
+  repeatMode: "off" | "track" | "playlist";
   currentTime: number;
   duration: number;
   youtubeUrl: string | null;
@@ -28,6 +30,10 @@ interface PlayerState {
 
   setCurrentTrack: (track: Track, newQueue?: Track[]) => void;
   setQueue: (queue: Track[]) => void;
+  reorderQueue: (startIndex: number, endIndex: number) => void;
+  removeFromQueue: (index: number) => void;
+  playNextInQueue: (index: number) => void;
+  addToQueue: (track: Track) => void;
   nextTrack: () => Promise<void>;
   previousTrack: () => void;
   togglePlay: () => void;
@@ -35,6 +41,7 @@ interface PlayerState {
   setPlayerExpanded: (expanded: boolean) => void;
   setIsLiked: (liked: boolean) => void;
   toggleShuffle: () => void;
+  toggleRepeat: () => void;
   setCurrentTime: (time: number) => void;
   setDuration: (duration: number) => void;
   setAudioData: (ytUrl: string) => void;
@@ -44,11 +51,19 @@ interface PlayerState {
   setAddToPlaylistOpen: (open: boolean) => void;
 }
 
-// Pomocnik do wyciągania pierwszego artysty przy ręcznym wyborze z wyszukiwarki
 function extractFirstArtist(artistStr: string): string {
   if (!artistStr) return "";
   const parts = artistStr.split(/,|\s+feat\.?|\s+ft\.?|\s+&\s+|\s+x\s+/i);
   return parts[0]?.trim() || artistStr.trim();
+}
+
+function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 export const usePlayerStore = create<PlayerState>()(
@@ -56,12 +71,14 @@ export const usePlayerStore = create<PlayerState>()(
     (set, get) => ({
       currentTrack: null,
       queue: [],
+      originalQueue: [],
       history: [],
       radioSeedArtist: null,
       isPlaying: false,
       isPlayerExpanded: false,
       isLiked: false,
       isShuffle: false,
+      repeatMode: "off",
       currentTime: 0,
       duration: 0,
       youtubeUrl: null,
@@ -74,15 +91,33 @@ export const usePlayerStore = create<PlayerState>()(
         const current = state.currentTrack;
         const history = current ? [...state.history, current] : state.history;
 
-        // Jeśli klikamy kawałek poza playlistą (np. z wyszukiwarki), ustalamy go jako fundament radia
         const seed =
           newQueue && newQueue.length > 0
             ? null
             : extractFirstArtist(track.artist);
 
+        const sourceQueue = newQueue !== undefined ? newQueue : state.originalQueue.length > 0 ? state.originalQueue : [track];
+        
+        let finalQueue: Track[] = [];
+
+        if (state.isShuffle && sourceQueue.length > 1) {
+          // Przy włączonym shuffle: bieżący utwór pierwszy, a reszta bez powtórzeń przetasowana
+          const others = sourceQueue.filter((t) => String(t.id) !== String(track.id));
+          finalQueue = [track, ...shuffleArray(others)];
+        } else {
+          // Przy odtwarzaniu po kolei: kolejka zaczyna się od wybranego utworu i idzie do końca
+          const trackIdx = sourceQueue.findIndex((t) => String(t.id) === String(track.id));
+          if (trackIdx !== -1) {
+            finalQueue = sourceQueue.slice(trackIdx);
+          } else {
+            finalQueue = [track, ...sourceQueue];
+          }
+        }
+
         set({
           currentTrack: { ...track, id: String(track.id) },
-          queue: newQueue !== undefined ? newQueue : [],
+          queue: finalQueue,
+          originalQueue: sourceQueue,
           history,
           radioSeedArtist: seed,
           isPlaying: true,
@@ -94,42 +129,90 @@ export const usePlayerStore = create<PlayerState>()(
 
       setQueue: (queue) => set({ queue }),
 
+      reorderQueue: (startIndex, endIndex) => {
+        const { queue } = get();
+        const updated = [...queue];
+        const [moved] = updated.splice(startIndex, 1);
+        updated.splice(endIndex, 0, moved);
+        set({ queue: updated });
+      },
+
+      removeFromQueue: (index) => {
+        const { queue } = get();
+        const updated = queue.filter((_, idx) => idx !== index);
+        set({ queue: updated });
+      },
+
+      playNextInQueue: (index) => {
+        const { queue } = get();
+        if (index <= 1 || index >= queue.length) return;
+        const updated = [...queue];
+        const [moved] = updated.splice(index, 1);
+        // Wstawiamy zaraz na 1. indeks (zaraz za currently playing [0])
+        updated.splice(1, 0, moved);
+        set({ queue: updated });
+      },
+
+      addToQueue: (track) => {
+        const { queue, originalQueue } = get();
+        const trackWithId = { ...track, id: String(track.id) };
+        set({
+          queue: [...queue, trackWithId],
+          originalQueue: [...originalQueue, trackWithId],
+        });
+      },
+
       nextTrack: async () => {
-        const { currentTrack, queue, history, isShuffle, radioSeedArtist } = get();
+        const { currentTrack, queue, originalQueue, history, repeatMode, radioSeedArtist } = get();
         if (!currentTrack) return;
 
-        // 1. Odtwarzanie z playlisty
-        if (queue.length > 0) {
-          const currentIndex = queue.findIndex(
-            (t) => String(t.id) === String(currentTrack.id)
-          );
-
-          let nextIndex = -1;
-          if (isShuffle && queue.length > 1) {
-            do {
-              nextIndex = Math.floor(Math.random() * queue.length);
-            } while (nextIndex === currentIndex);
-          } else {
-            nextIndex = (currentIndex + 1) % queue.length;
-          }
-
-          const next = queue[nextIndex];
-          if (next) {
-            set({
-              currentTrack: { ...next, id: String(next.id) },
-              history: [...history, currentTrack],
-              isPlaying: true,
-              isLiked: false,
-              currentTime: 0,
-              duration: next.duration || 0,
-            });
-            return;
-          }
+        // Tryb 1: Zapętlenie tego samego utworu
+        if (repeatMode === "track") {
+          set({ seekTarget: 0, currentTime: 0, isPlaying: true });
+          return;
         }
 
-        // 2. Tryb Radia: Używamy zapamiętanego głównego wykonawcy (radioSeedArtist)
-        const targetArtist = radioSeedArtist || extractFirstArtist(currentTrack.artist);
+        // Kolejka: sprawdzamy czy za bieżącym utworem (indeks 0 lub bieżący indeks) jest kolejny utwór
+        if (queue.length > 1) {
+          // Bierzemy następny utwór z kolejki (pozycja 1, bo pozycja 0 to bieżący)
+          const next = queue[1];
+          // Przesuwamy kolejkę do przodu: usuwamy poprzedni utwór z czoła
+          const remainingQueue = queue.slice(1);
 
+          set({
+            currentTrack: { ...next, id: String(next.id) },
+            queue: remainingQueue,
+            history: [...history, currentTrack],
+            isPlaying: true,
+            isLiked: false,
+            currentTime: 0,
+            duration: next.duration || 0,
+          });
+          return;
+        }
+
+        // Jeśli kolejka dobiegła końca, a włączone jest zapętlenie playlisty ("playlist"):
+        if (repeatMode === "playlist" && originalQueue.length > 0) {
+          const firstTrack = originalQueue[0];
+          set({
+            currentTrack: { ...firstTrack, id: String(firstTrack.id) },
+            queue: [...originalQueue],
+            history: [...history, currentTrack],
+            isPlaying: true,
+            isLiked: false,
+            currentTime: 0,
+            duration: firstTrack.duration || 0,
+          });
+          return;
+        }
+
+        // Tryb radio: tylko gdy brak powtarzania i pusta kolejka
+        if (repeatMode !== "off") {
+          set({ isPlaying: false, currentTime: 0 });
+          return;
+        }
+
+        const targetArtist = radioSeedArtist || extractFirstArtist(currentTrack.artist);
         set({ isLoadingAudio: true });
         try {
           const res = await fetch(
@@ -139,17 +222,17 @@ export const usePlayerStore = create<PlayerState>()(
           );
 
           if (!res.ok) throw new Error("Błąd pobierania pokrewnego");
-
           const data = await res.json();
 
           if (data && data.track) {
+            const radioTrack = {
+              ...data.track,
+              id: String(data.track.id),
+              source: `Radio: ${targetArtist}`,
+            };
             set({
-              currentTrack: {
-                ...data.track,
-                id: String(data.track.id),
-                // Zapewniamy, że nagłówek źródła nie zmieni się na "Radio: Skok", tylko pozostanie "Radio: Kukon"
-                source: `Radio: ${targetArtist}`,
-              },
+              currentTrack: radioTrack,
+              queue: [radioTrack],
               history: [...history, currentTrack],
               isPlaying: true,
               isLiked: false,
@@ -209,7 +292,47 @@ export const usePlayerStore = create<PlayerState>()(
       setIsPlaying: (playing) => set({ isPlaying: playing }),
       setPlayerExpanded: (expanded) => set({ isPlayerExpanded: expanded }),
       setIsLiked: (isLiked) => set({ isLiked }),
-      toggleShuffle: () => set((state) => ({ isShuffle: !state.isShuffle })),
+      toggleShuffle: () => {
+        const state = get();
+        const nextShuffle = !state.isShuffle;
+
+        if (!state.currentTrack || state.queue.length <= 1) {
+          set({ isShuffle: nextShuffle });
+          return;
+        }
+
+        const current = state.currentTrack;
+        const baseList = state.originalQueue.length > 0 ? state.originalQueue : state.queue;
+
+        if (nextShuffle) {
+          // Włączono Shuffle: bieżący zostaje, reszta jest przetasowana
+          const rest = baseList.filter((t) => String(t.id) !== String(current.id));
+          set({
+            isShuffle: true,
+            queue: [current, ...shuffleArray(rest)],
+          });
+        } else {
+          // Wyłączono Shuffle: powrót do kolejności oryginalnej
+          const currentIdx = baseList.findIndex((t) => String(t.id) === String(current.id));
+          let restored: Track[] = [];
+          if (currentIdx !== -1) {
+            restored = baseList.slice(currentIdx);
+          } else {
+            restored = [current, ...baseList.filter((t) => String(t.id) !== String(current.id))];
+          }
+          set({
+            isShuffle: false,
+            queue: restored,
+          });
+        }
+      },
+      toggleRepeat: () =>
+        set((state) => {
+          const modes: ("off" | "playlist" | "track")[] = ["off", "playlist", "track"];
+          const currentIdx = modes.indexOf(state.repeatMode || "off");
+          const nextMode = modes[(currentIdx + 1) % modes.length];
+          return { repeatMode: nextMode };
+        }),
       setCurrentTime: (currentTime) => set({ currentTime }),
       setDuration: (duration) => set({ duration }),
       setAudioData: (youtubeUrl) => set({ youtubeUrl, isLoadingAudio: false }),
@@ -229,6 +352,7 @@ export const usePlayerStore = create<PlayerState>()(
         duration: state.duration,
         isLiked: state.isLiked,
         isShuffle: state.isShuffle,
+        repeatMode: state.repeatMode,
         youtubeUrl: state.youtubeUrl,
       }),
     }
