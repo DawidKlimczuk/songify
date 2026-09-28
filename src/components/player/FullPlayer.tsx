@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import { toggleLikeTrack, isTrackLiked, addSongToPlaylist } from "@/app/actions/playlist";
 import {
@@ -25,6 +25,7 @@ import {
   Trash2,
   ListPlus,
   Volume2,
+  Moon,
 } from "lucide-react";
 
 export default function FullPlayer() {
@@ -53,7 +54,44 @@ export default function FullPlayer() {
     removeFromQueue,
     playNextInQueue,
     setAddToPlaylistOpen,
+    sleepTimerEndsAt,
+    sleepTimerMode,
+    setSleepTimer,
   } = usePlayerStore();
+
+  const [isSleepModalOpen, setIsSleepModalOpen] = useState(false);
+  const [remainingTimerText, setRemainingTimerText] = useState<string | null>(null);
+  const [selectedWheelMinutes, setSelectedWheelMinutes] = useState<number>(30);
+  const wheelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!sleepTimerEndsAt || sleepTimerMode !== "time") {
+      setRemainingTimerText(null);
+      return;
+    }
+
+    const updateTimer = () => {
+      const diffMs = sleepTimerEndsAt - Date.now();
+      if (diffMs <= 0) {
+        setRemainingTimerText(null);
+      } else {
+        const mins = Math.ceil(diffMs / 60000);
+        setRemainingTimerText(`${mins}m`);
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 5000);
+    return () => clearInterval(interval);
+  }, [sleepTimerEndsAt, sleepTimerMode]);
+
+  // Po otwarciu modala centrujemy wałek na wybranej wartości
+  useEffect(() => {
+    if (isSleepModalOpen && wheelRef.current) {
+      const itemHeight = 44; // wysokość każdego elementu na bębenku
+      wheelRef.current.scrollTop = (selectedWheelMinutes - 1) * itemHeight;
+    }
+  }, [isSleepModalOpen]);
 
   // Stan przeciągania myszą / palcem (Drag & Drop Reorder)
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
@@ -350,59 +388,59 @@ export default function FullPlayer() {
           </button>
         </div>
 
-        {/* Dolny pasek akcji: Kolejka + Split-Button + Udostępnij */}
-        <div className="flex items-center justify-center gap-3 pt-1">
+        {/* Dolny pasek akcji: 4 czyste, równe ikony bez zbędnych ramek i rozdzielaczy */}
+        <div className="flex items-center justify-between px-3 pt-2">
           {/* Przycisk Kolejki Odtwarzania */}
           <button
             onClick={() => setIsQueueOpen(true)}
-            className={`flex h-9 w-9 items-center justify-center rounded-full border transition active:scale-90 ${
+            className={`p-2 transition active:scale-90 ${
               isQueueOpen
-                ? "border-teal-400 bg-teal-950/60 text-teal-400"
-                : "border-teal-900/50 bg-[#0e1619] text-gray-400 hover:text-white hover:border-teal-500/50"
+                ? "text-teal-400 [html.light_&]:!text-[#db2777]"
+                : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
             }`}
             title="Kolejka odtwarzania"
           >
-            <ListMusic className="h-4 w-4" />
+            <ListMusic className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
           </button>
 
-          {/* Kompaktowy Split-Button (Ikonka + Strzałka) */}
-          <div className="inline-flex items-center rounded-full border border-teal-900/50 bg-[#0e1619] h-9 transition hover:border-teal-500/50">
-            {/* Lewa część: Ikona dodawania */}
-            <button
-              onClick={handleQuickAddToPlaylist}
-              disabled={isQuickAdding}
-              className="flex items-center justify-center pl-3 pr-2 h-full hover:text-white transition active:scale-90 disabled:opacity-50"
-              title="Dodaj utwór do zaznaczonych playlist"
-            >
-              {quickAddedSuccess ? (
-                <Check className="h-4 w-4 text-emerald-400 stroke-[3]" />
-              ) : isQuickAdding ? (
-                <Loader2 className="h-4 w-4 animate-spin text-teal-400" />
-              ) : (
-                <FolderPlus className="h-4 w-4 text-teal-400" />
-              )}
-            </button>
-
-            {/* Subtelna linia rozdzielająca */}
-            <div className="h-4 w-[1px] bg-teal-950/90" />
-
-            {/* Prawa część: Strzałka w dół otwierająca wybór playlist */}
-            <button
-              onClick={() => setAddToPlaylistOpen(true)}
-              className="flex items-center justify-center pl-2 pr-3 h-full text-gray-400 hover:text-teal-400 transition active:scale-90"
-              title="Wybierz lub skonfiguruj docelowe playlisty"
-            >
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          {/* Przycisk Dodaj do playlisty (otwiera modal wyboru playlist) */}
+          <button
+            onClick={() => setAddToPlaylistOpen(true)}
+            className="p-2 text-gray-400 hover:text-white transition active:scale-90 [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
+            title="Dodaj do playlisty"
+          >
+            <FolderPlus className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
+          </button>
 
           {/* Przycisk Udostępnij */}
           <button
             onClick={handleShare}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-teal-900/50 bg-[#0e1619] text-gray-400 hover:text-white hover:border-teal-500/50 transition active:scale-90"
+            className="p-2 text-gray-400 hover:text-white transition active:scale-90 [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
             title="Udostępnij utwór"
           >
-            <Share2 className="h-4 w-4" />
+            <Share2 className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
+          </button>
+
+          {/* Przycisk Sleep Timer */}
+          <button
+            onClick={() => setIsSleepModalOpen(true)}
+            className={`flex items-center gap-1.5 p-2 transition active:scale-90 ${
+              sleepTimerEndsAt || sleepTimerMode === "end_of_track"
+                ? "text-teal-400 font-bold [html.light_&]:!text-[#db2777]"
+                : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
+            }`}
+            title="Wyłącznik czasowy (Sleep Timer)"
+          >
+            <Moon className="h-5 w-5 stroke-[2.2] flex-shrink-0 [html.light_&]:!stroke-[#9f1239]" />
+            {remainingTimerText ? (
+              <span className="font-mono text-xs font-bold tracking-tight [html.light_&]:!text-[#9f1239]">
+                {remainingTimerText}
+              </span>
+            ) : sleepTimerMode === "end_of_track" ? (
+              <span className="text-[11px] font-semibold tracking-tight [html.light_&]:!text-[#9f1239]">
+                Koniec
+              </span>
+            ) : null}
           </button>
         </div>
       </div>
@@ -668,6 +706,127 @@ export default function FullPlayer() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Sleep Timera - z czytelnymi kolorami w Dark i Light */}
+      {isSleepModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 px-4 pb-6 sm:pb-0 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-xs rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612] [html.light_&]:shadow-2xl [html.light_&]:shadow-[#f472b6]/20">
+            {/* Nagłówek */}
+            <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-3">
+              <div className="flex items-center gap-2">
+                <Moon className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                <h3 className="text-sm font-bold tracking-tight text-white [html.light_&]:text-[#5c0612]">
+                  Wyłącznik czasowy
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsSleepModalOpen(false)}
+                className="p-1.5 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] [html.light_&]:hover:bg-[#fce7f3] transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Stan aktualnego timera (jeśli aktywny) */}
+            {(sleepTimerEndsAt || sleepTimerMode) && (
+              <div className="mb-4 rounded-xl bg-teal-950/40 border border-teal-800/40 p-2.5 flex items-center justify-between text-xs [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#fecdd3]">
+                <div>
+                  <span className="text-gray-400 text-[10px] block uppercase font-bold [html.light_&]:text-[#be123c]">
+                    Aktywne uśpienie
+                  </span>
+                  <span className="font-bold text-teal-300 [html.light_&]:text-[#9f1239]">
+                    {sleepTimerMode === "end_of_track"
+                      ? "Po bieżącym utworze"
+                      : `Za około ${remainingTimerText}`}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    setSleepTimer(null);
+                    setIsSleepModalOpen(false);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 [html.light_&]:bg-[#fee2e2] [html.light_&]:text-[#dc2626] text-[11px] font-bold transition"
+                >
+                  Wyłącz
+                </button>
+              </div>
+            )}
+
+            {/* BĘBENEK / WAŁEK CZASU (1 - 60 MIN) */}
+            <div className="relative my-3 flex flex-col items-center select-none">
+              {/* Podświetlony pasek środka wałka */}
+              <div className="pointer-events-none absolute top-1/2 left-0 right-0 h-11 -translate-y-1/2 rounded-xl border border-teal-500/40 bg-teal-500/10 [html.light_&]:border-[#f472b6] [html.light_&]:bg-[#fdf2f8]" />
+
+              {/* Kontener scrolla wałka */}
+              <div
+                ref={wheelRef}
+                onScroll={(e) => {
+                  const target = e.currentTarget;
+                  const itemHeight = 44;
+                  const index = Math.round(target.scrollTop / itemHeight);
+                  const minute = Math.min(Math.max(index + 1, 1), 60);
+                  setSelectedWheelMinutes(minute);
+                }}
+                className="relative h-[132px] w-full overflow-y-auto snap-y snap-mandatory scrollbar-none py-[44px]"
+              >
+                {Array.from({ length: 60 }, (_, i) => i + 1).map((minute) => {
+                  const isSelected = selectedWheelMinutes === minute;
+                  return (
+                    <div
+                      key={minute}
+                      onClick={() => {
+                        setSelectedWheelMinutes(minute);
+                        if (wheelRef.current) {
+                          wheelRef.current.scrollTo({
+                            top: (minute - 1) * 44,
+                            behavior: "smooth",
+                          });
+                        }
+                      }}
+                      className={`flex h-[44px] items-center justify-center snap-center font-bold transition cursor-pointer ${
+                        isSelected
+                          ? "text-xl text-teal-400 scale-110 [html.light_&]:text-[#be123c]"
+                          : "text-gray-500 opacity-40 hover:opacity-80 text-sm [html.light_&]:text-[#f472b6]"
+                      }`}
+                    >
+                      <span>{minute} min</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Przycisk: Koniec tego utworu */}
+            <button
+              onClick={() => {
+                setSleepTimer(null, "end_of_track");
+                setIsSleepModalOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border mb-3 text-xs font-semibold transition ${
+                sleepTimerMode === "end_of_track"
+                  ? "border-teal-400 bg-teal-950/40 text-teal-300 [html.light_&]:border-[#db2777] [html.light_&]:bg-[#fdf2f8] [html.light_&]:text-[#be123c]"
+                  : "border-teal-950/70 bg-[#121c20] text-gray-300 hover:text-teal-400 [html.light_&]:border-[#fce7f3] [html.light_&]:bg-[#fff5f7] [html.light_&]:text-[#9f1239] [html.light_&]:hover:border-[#fbcfe8]"
+              }`}
+            >
+              <span>Uśpij na koniec tego utworu</span>
+              {sleepTimerMode === "end_of_track" && (
+                <Check className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+              )}
+            </button>
+
+            {/* Przycisk aktywacji wybranego czasu z rolki */}
+            <button
+              onClick={() => {
+                setSleepTimer(selectedWheelMinutes, "time");
+                setIsSleepModalOpen(false);
+              }}
+              className="w-full rounded-2xl bg-teal-400 py-3 text-xs font-bold text-black shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition [html.light_&]:bg-[#db2777] [html.light_&]:text-white [html.light_&]:shadow-[#db2777]/30 [html.light_&]:hover:bg-[#be123c]"
+            >
+              Ustaw wyłącznik na {selectedWheelMinutes} min
+            </button>
           </div>
         </div>
       )}

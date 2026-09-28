@@ -49,6 +49,11 @@ interface PlayerState {
   seekTo: (seconds: number) => void;
   resetSeek: () => void;
   setAddToPlaylistOpen: (open: boolean) => void;
+
+  // Sleep Timer
+  sleepTimerEndsAt: number | null;
+  sleepTimerMode: "time" | "end_of_track" | null;
+  setSleepTimer: (minutes: number | null, mode?: "time" | "end_of_track") => void;
 }
 
 function extractFirstArtist(artistStr: string): string {
@@ -85,6 +90,8 @@ export const usePlayerStore = create<PlayerState>()(
       isLoadingAudio: false,
       seekTarget: null,
       isAddToPlaylistOpen: false,
+      sleepTimerEndsAt: null,
+      sleepTimerMode: null,
 
       setCurrentTrack: (track, newQueue) => {
         const state = get();
@@ -355,6 +362,21 @@ export const usePlayerStore = create<PlayerState>()(
       seekTo: (seconds) => set({ seekTarget: seconds, currentTime: seconds }),
       resetSeek: () => set({ seekTarget: null }),
       setAddToPlaylistOpen: (isAddToPlaylistOpen) => set({ isAddToPlaylistOpen }),
+
+      setSleepTimer: (minutes, mode = "time") => {
+        if (minutes === null) {
+          set({ sleepTimerEndsAt: null, sleepTimerMode: null });
+          return;
+        }
+
+        if (mode === "end_of_track") {
+          set({ sleepTimerEndsAt: null, sleepTimerMode: "end_of_track" });
+          return;
+        }
+
+        const endsAt = Date.now() + minutes * 60 * 1000;
+        set({ sleepTimerEndsAt: endsAt, sleepTimerMode: "time" });
+      },
     }),
     {
       name: "songify_player_state",

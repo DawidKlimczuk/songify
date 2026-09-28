@@ -47,6 +47,9 @@ export async function getUserPlaylists() {
       _count: {
         select: { songs: true },
       },
+      songs: {
+        select: { songId: true },
+      },
     },
     orderBy: { createdAt: "asc" },
   });

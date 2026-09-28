@@ -32,6 +32,9 @@ export default function AudioEngine() {
     resetSeek,
     nextTrack,
     previousTrack,
+    sleepTimerEndsAt,
+    sleepTimerMode,
+    setSleepTimer,
   } = usePlayerStore();
 
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
@@ -184,6 +187,18 @@ export default function AudioEngine() {
                     setIsPlaying(false);
                     silentAudioRef.current?.pause();
                   } else if (event.data === 0) {
+                    // Sprawdzamy czy był aktywny tryb uśpienia na koniec utworu
+                    const currentMode = usePlayerStore.getState().sleepTimerMode;
+                    if (currentMode === "end_of_track") {
+                      try {
+                        playerRef.current?.stopVideo?.();
+                      } catch {}
+                      setIsPlaying(false);
+                      silentAudioRef.current?.pause();
+                      setSleepTimer(null);
+                      return;
+                    }
+
                     // ENDED -> autoodtwarzanie następnego
                     try {
                       playerRef.current?.stopVideo?.();
@@ -343,6 +358,40 @@ export default function AudioEngine() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isPlaying, duration, setCurrentTime, setDuration]);
+
+  // 7. Obsługa Sleep Timera (płynny Fade-out i automatyczna pauza)
+  useEffect(() => {
+    if (!sleepTimerEndsAt || sleepTimerMode !== "time") return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const timeLeftMs = sleepTimerEndsAt - now;
+
+      if (timeLeftMs <= 0) {
+        // Koniec czasu -> Pauza, reset głośności i zerowanie timera
+        clearInterval(interval);
+        if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
+          playerRef.current.pauseVideo();
+          try {
+            playerRef.current.setVolume(100);
+          } catch {}
+        }
+        silentAudioRef.current?.pause();
+        setIsPlaying(false);
+        setSleepTimer(null);
+        return;
+      }
+
+      // Płynny fade-out przez ostatnie 10 sekund
+      if (timeLeftMs <= 10000 && playerRef.current && typeof playerRef.current.setVolume === "function") {
+        const factor = Math.max(0, timeLeftMs / 10000);
+        const targetVol = Math.floor(factor * 100);
+        playerRef.current.setVolume(targetVol);
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [sleepTimerEndsAt, sleepTimerMode, setIsPlaying, setSleepTimer]);
 
   return (
     <div className="fixed -top-96 -left-96 h-1 w-1 opacity-0 pointer-events-none overflow-hidden">
