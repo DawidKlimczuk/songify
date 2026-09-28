@@ -140,8 +140,11 @@ export default function AudioEngine() {
 
         setAudioData(data.youtubeUrl);
 
-        // Jeśli to wejście do aplikacji z zapisanym stanem, startujemy od zapisanego czasu, a nie od 0
-        const initialTime = isDifferentTrack ? 0 : Math.floor(currentTime || 0);
+        // Nowa piosenka ZAWSZE startuje od 0:00!
+        const initialTime = isDifferentTrack ? 0 : Math.max(0, Math.floor(currentTime || 0));
+        if (isDifferentTrack) {
+          setCurrentTime(0);
+        }
 
         const launchPlayer = () => {
           if (!playerRef.current) {

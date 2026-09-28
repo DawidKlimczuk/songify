@@ -17,6 +17,7 @@ export default function ConnectSyncEngine() {
     deviceName,
     deviceType,
     activeDeviceId,
+    onlineDevices,
     volume,
     initDevice,
     setOnlineDevices,
@@ -132,7 +133,9 @@ export default function ConnectSyncEngine() {
       })
       // D. Zdalne komendy użytkownika (Play, Pause, Next, Prev, Seek, zmiana urządzenia)
       .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
-        if (!payload || payload.senderId === deviceId) return;
+        const currentMyId = useDeviceStore.getState().deviceId;
+        // TWARDY filtr: ignorujemy własne pakiety oraz pakiety gdy jesteśmy jedynym urządzeniem
+        if (!payload || payload.senderId === currentMyId || !currentMyId) return;
 
         isHandlingRemoteActionRef.current = true;
 
@@ -231,9 +234,10 @@ export default function ConnectSyncEngine() {
     seekTo,
   ]);
 
-  // 3. Rozgłaszanie zmiany utworu z tego urządzenia
+  // 3. Rozgłaszanie zmiany utworu z tego urządzenia (tylko gdy inne urządzenia są w sieci!)
   useEffect(() => {
     if (!currentTrack || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
+    if (onlineDevices.length <= 1) return; // Jeśli jesteśmy sami, nie rozsyłamy niczego do sieci!
     if (lastTrackIdSentRef.current === currentTrack.id) return;
 
     lastTrackIdSentRef.current = currentTrack.id;
@@ -248,11 +252,12 @@ export default function ConnectSyncEngine() {
         queue,
       },
     });
-  }, [currentTrack?.id, queue, deviceId]);
+  }, [currentTrack?.id, queue, deviceId, onlineDevices.length]);
 
   // 4. Rozgłaszanie kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
     if (isHandlingRemoteActionRef.current || !activeRealtimeChannel || !currentTrack) return;
+    if (onlineDevices.length <= 1) return; // Jeśli jesteśmy sami, nie dotykamy sieci!
 
     activeRealtimeChannel.send({
       type: "broadcast",
@@ -263,7 +268,7 @@ export default function ConnectSyncEngine() {
         isPlaying,
       },
     });
-  }, [isPlaying, deviceId]);
+  }, [isPlaying, deviceId, onlineDevices.length]);
 
   // 5. Host audio wysyła TICK czasu (bez żadnego wymuszania isPlaying)
   useEffect(() => {
