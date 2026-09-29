@@ -10,6 +10,8 @@ let activeRealtimeChannel: any = null;
 export default function ConnectSyncEngine() {
   const supabase = createClient();
   const isHandlingRemoteActionRef = useRef<boolean>(false);
+  const isSeekingGuardRef = useRef<boolean>(false);
+  const isInitialSyncGracePeriodRef = useRef<boolean>(true);
   const lastTrackIdSentRef = useRef<string | null>(null);
 
   const {
@@ -29,6 +31,7 @@ export default function ConnectSyncEngine() {
     currentTrack,
     isPlaying,
     currentTime,
+    seekTarget,
     queue,
     setCurrentTrack,
     setIsPlaying,
@@ -89,34 +92,39 @@ export default function ConnectSyncEngine() {
       .on("broadcast", { event: "REQUEST_HOST_STATE" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
 
-        const currentActive = useDeviceStore.getState().activeDeviceId;
-        const amIHost = !currentActive || currentActive === deviceId;
+        const pState = usePlayerStore.getState();
+        const dState = useDeviceStore.getState();
+        const amIPlaying = pState.isPlaying;
+        const amIActiveHost = dState.activeDeviceId === deviceId;
 
-        if (amIHost && currentTrack) {
+        // Jeśli to na mnie aktualnie leci muzyka LUB jestem oznaczony jako host
+        if ((amIPlaying || amIActiveHost) && pState.currentTrack) {
           channel.send({
             type: "broadcast",
             event: "PROVIDE_HOST_STATE",
             payload: {
               targetId: payload.senderId,
-              activeDeviceId: deviceId,
-              currentTrack,
-              queue,
-              isPlaying,
-              currentTime: usePlayerStore.getState().currentTime || 0,
+              activeDeviceId: dState.activeDeviceId || deviceId,
+              currentTrack: pState.currentTrack,
+              queue: pState.queue,
+              isPlaying: pState.isPlaying,
+              currentTime: pState.currentTime || 0,
             },
           });
         }
       })
-      // C. Otrzymanie pełnego snapshotu od hosta
+      // C. Otrzymanie pełnego snapshotu od grającego hosta
       .on("broadcast", { event: "PROVIDE_HOST_STATE" }, ({ payload }) => {
         if (!payload || payload.targetId !== deviceId) return;
 
         isHandlingRemoteActionRef.current = true;
+        isInitialSyncGracePeriodRef.current = false;
 
         if (payload.activeDeviceId) {
           setActiveDeviceId(payload.activeDeviceId);
         }
         if (payload.currentTrack) {
+          lastTrackIdSentRef.current = payload.currentTrack.id;
           setCurrentTrack(payload.currentTrack, payload.queue || []);
         }
         if (typeof payload.currentTime === "number") {
@@ -129,7 +137,7 @@ export default function ConnectSyncEngine() {
 
         setTimeout(() => {
           isHandlingRemoteActionRef.current = false;
-        }, 500);
+        }, 600);
       })
       // D. Zdalne komendy użytkownika (Play, Pause, Next, Prev, Seek, zmiana urządzenia)
       .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
@@ -163,7 +171,12 @@ export default function ConnectSyncEngine() {
 
           case "SEEK_TO":
             if (typeof payload.time === "number") {
+              isSeekingGuardRef.current = true;
+              setCurrentTime(payload.time);
               seekTo(payload.time);
+              setTimeout(() => {
+                isSeekingGuardRef.current = false;
+              }, 1000);
             }
             break;
 
@@ -183,14 +196,13 @@ export default function ConnectSyncEngine() {
           isHandlingRemoteActionRef.current = false;
         }, 300);
       })
-      // E. Tylko i wyłącznie precyzyjny postęp suwaka (ZERO zmian isPlaying!)
+      // E. Tylko i wyłącznie precyzyjny postęp suwaka (z ochroną podczas przewijania)
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
-        if (!payload || payload.senderId === deviceId) return;
+        if (!payload || payload.senderId === deviceId || isSeekingGuardRef.current) return;
 
         const currentActive = useDeviceStore.getState().activeDeviceId;
         const amIHost = !currentActive || currentActive === deviceId;
 
-        // Czas aktualizują tylko urządzenia, które NIE są hostem
         if (!amIHost && typeof payload.currentTime === "number") {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
           const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.8));
@@ -206,12 +218,16 @@ export default function ConnectSyncEngine() {
             onlineAt: new Date().toISOString(),
           });
 
-          // Pytamy sieć o stan
+          // Pytamy sieć, czy na innym urządzeniu gra muzyka
           channel.send({
             type: "broadcast",
             event: "REQUEST_HOST_STATE",
             payload: { senderId: deviceId },
           });
+
+          setTimeout(() => {
+            isInitialSyncGracePeriodRef.current = false;
+          }, 1500);
         }
       });
 
@@ -236,7 +252,7 @@ export default function ConnectSyncEngine() {
 
   // 3. Rozgłaszanie zmiany utworu z tego urządzenia (tylko gdy inne urządzenia są w sieci!)
   useEffect(() => {
-    if (!currentTrack || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
+    if (!currentTrack || isHandlingRemoteActionRef.current || isInitialSyncGracePeriodRef.current || !activeRealtimeChannel) return;
     if (onlineDevices.length <= 1) return; // Jeśli jesteśmy sami, nie rozsyłamy niczego do sieci!
     if (lastTrackIdSentRef.current === currentTrack.id) return;
 
@@ -292,6 +308,30 @@ export default function ConnectSyncEngine() {
     return () => clearInterval(interval);
   }, [isCurrentHost, isPlaying, deviceId, currentTrack]);
 
+  // 6. Rozgłaszanie przewijania piosenki (Seek) do pozostałych urządzeń w sieci
+  useEffect(() => {
+    if (seekTarget === null || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
+    if (onlineDevices.length <= 1) return;
+
+    isSeekingGuardRef.current = true;
+
+    activeRealtimeChannel.send({
+      type: "broadcast",
+      event: "CONNECT_COMMAND",
+      payload: {
+        senderId: deviceId,
+        type: "SEEK_TO",
+        time: seekTarget,
+      },
+    });
+
+    const timeout = setTimeout(() => {
+      isSeekingGuardRef.current = false;
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [seekTarget, deviceId, onlineDevices.length]);
+  
   return null;
 }
 
