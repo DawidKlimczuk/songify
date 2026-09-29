@@ -96,14 +96,18 @@ export default function ConnectSyncEngine() {
         const pState = usePlayerStore.getState();
         const dState = useDeviceStore.getState();
 
-        // Jeśli to ja jestem hostem i mam utwór (grający lub zapauzowany)
-        if (pState.currentTrack && (dState.activeDeviceId === deviceId || !dState.activeDeviceId)) {
+        // Jeśli to urządzenie faktycznie gra dźwięk (isPlaying) LUB jest wybranym hostem:
+        const amIActuallyPlaying = pState.isPlaying;
+        const amIDesignatedHost = dState.activeDeviceId === deviceId;
+        const noHostClaimedYet = !dState.activeDeviceId || dState.activeDeviceId === "";
+
+        if (pState.currentTrack && (amIActuallyPlaying || amIDesignatedHost || noHostClaimedYet)) {
           channel.send({
             type: "broadcast",
             event: "PROVIDE_HOST_STATE",
             payload: {
               targetId: payload.senderId,
-              activeDeviceId: dState.activeDeviceId || deviceId,
+              activeDeviceId: dState.activeDeviceId || (amIActuallyPlaying ? deviceId : ""),
               currentTrack: pState.currentTrack,
               queue: pState.queue,
               isPlaying: pState.isPlaying,
