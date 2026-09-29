@@ -194,6 +194,17 @@ export default function AudioEngine() {
 
                   if (event.data === 1) {
                     // PLAYING
+                    const currentlyPlayingInStore = usePlayerStore.getState().isPlaying;
+                    
+                    // Jeśli w aplikacji piosenka miała być zapauzowana (np. świeże wejście), 
+                    // a YouTube samowolnie odpalił bufor -> natychmiast go uciszamy i nie zmieniamy ikony!
+                    if (!currentlyPlayingInStore) {
+                      try {
+                        playerRef.current?.pauseVideo();
+                      } catch {}
+                      return;
+                    }
+
                     setIsPlaying(true);
                     silentAudioRef.current?.play().catch(() => {});
                     setIsLoadingAudio(false);
