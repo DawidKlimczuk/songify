@@ -42,6 +42,11 @@ export default function AudioEngine() {
   const { deviceId, activeDeviceId, volume } = useDeviceStore();
   const isAudioHost = !activeDeviceId || activeDeviceId === "" || deviceId === activeDeviceId;
 
+  // Wymuszenie czystego stanu pauzy przy zimnym starcie karty/aplikacji
+  useEffect(() => {
+    setIsPlaying(false);
+  }, [setIsPlaying]);
+
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -173,12 +178,15 @@ export default function AudioEngine() {
                     event.target.seekTo(initialTime, true);
                   }
 
+                  // Tylko aktywne urządzenie ma prawo odpalać dźwięk
                   if (isPlaying && isAudioHost) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
-                    event.target.pauseVideo();
-                    setIsPlaying(false);
+                    // Ciche zatrzymanie lokalnego playera bez rozsyłania pauzy do aplikacji/sieci
+                    try {
+                      event.target.pauseVideo();
+                    } catch {}
                   }
                 },
                 onStateChange: (event: any) => {

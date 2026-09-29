@@ -228,11 +228,13 @@ export default function ConnectSyncEngine() {
 
           askHost();
           const retryAsk = setTimeout(askHost, 500);
+          const secondRetry = setTimeout(askHost, 1000);
 
           setTimeout(() => {
             isInitialSyncGracePeriodRef.current = false;
             clearTimeout(retryAsk);
-          }, 1500);
+            clearTimeout(secondRetry);
+          }, 2500);
         }
       });
 
@@ -282,6 +284,7 @@ export default function ConnectSyncEngine() {
       return;
     }
 
+    // Blokada: w trakcie startu lub odbierania akcji zdalnej NIE wysyłamy nic
     if (
       isHandlingRemoteActionRef.current ||
       isInitialSyncGracePeriodRef.current ||
