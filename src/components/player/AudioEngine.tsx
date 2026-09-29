@@ -43,11 +43,6 @@ export default function AudioEngine() {
   const { deviceId, activeDeviceId, volume } = useDeviceStore();
   const isAudioHost = !activeDeviceId || activeDeviceId === "" || deviceId === activeDeviceId;
 
-  // Wymuszenie czystego stanu pauzy przy zimnym starcie karty/aplikacji
-  useEffect(() => {
-    setIsPlaying(false);
-  }, [setIsPlaying]);
-
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
     if (typeof window === "undefined") return;
