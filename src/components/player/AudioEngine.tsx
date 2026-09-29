@@ -18,6 +18,7 @@ export default function AudioEngine() {
   const activeTrackIdRef = useRef<string | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
   const silentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const userInitiatedPlayRef = useRef<boolean>(false);
 
   const {
     currentTrack,
@@ -195,14 +196,13 @@ export default function AudioEngine() {
                   if (!isAudioHost) return;
 
                   if (event.data === 1) {
-                    const shouldPlay = usePlayerStore.getState().isPlaying;
-                    
-                    // Jeśli użytkownik sam nie kliknął Play, natychmiast pauzujemy Iframe i trzymamy ikonę Play
-                    if (!shouldPlay) {
+                    // BLOKADA: jeśli użytkownik nie zainicjował kliknięcia od startu, uciszamy YouTube
+                    if (!userInitiatedPlayRef.current && !usePlayerStore.getState().isPlaying) {
                       try {
                         playerRef.current?.pauseVideo();
                       } catch {}
                       setIsPlaying(false);
+                      setIsLoadingAudio(false);
                       return;
                     }
 
@@ -301,6 +301,10 @@ export default function AudioEngine() {
 
   // 4. Obsługa kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
+    if (isPlaying) {
+      userInitiatedPlayRef.current = true;
+    }
+
     if (!isReadyRef.current || !playerRef.current) return;
 
     try {
@@ -438,7 +442,14 @@ export default function AudioEngine() {
       return;
     }
 
-    // Nowy host przejmuje strumień
+    // Jeśli w aplikacji piosenka jest na pauzie (np. wejście do aplikacji),
+    // pod żadnym pozorem nie uruchamiamy samowolnego odtwarzania!
+    const shouldPlay = usePlayerStore.getState().isPlaying;
+    if (!shouldPlay) {
+      return;
+    }
+
+    // Nowy host przejmuje aktywny strumień tylko wtedy, gdy muzyka faktycznie gra
     const exactSec = usePlayerStore.getState().currentTime || 0;
     let hasSeeked = false;
 

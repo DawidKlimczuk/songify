@@ -311,7 +311,10 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-      setIsPlaying: (playing) => set({ isPlaying: playing }),
+      setIsPlaying: (playing) => {
+        console.trace("[DEBUG SONGIFY] setIsPlaying wywołane z:", playing);
+        set({ isPlaying: playing });
+      },
       setPlayerExpanded: (expanded) => set({ isPlayerExpanded: expanded }),
       setIsLiked: (isLiked) => set({ isLiked }),
       toggleShuffle: () => {
@@ -381,6 +384,12 @@ export const usePlayerStore = create<PlayerState>()(
     {
       name: "songify_player_state",
       storage: createJSONStorage(() => localStorage),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Gwarancja: po wczytaniu ze schowka stan ZAWSZE jest zapauzowany
+          state.isPlaying = false;
+        }
+      },
       partialize: (state) => ({
         currentTrack: state.currentTrack,
         queue: state.queue,

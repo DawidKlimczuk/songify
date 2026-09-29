@@ -9,6 +9,7 @@ export default function MiniPlayer() {
   const {
     currentTrack,
     isPlaying,
+    isLoadingAudio,
     isLiked,
     currentTime,
     duration,
@@ -128,12 +129,13 @@ export default function MiniPlayer() {
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (isLoadingAudio) return;
               togglePlay();
             }}
             className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-400 text-black shadow-md shadow-teal-400/20 hover:scale-105 active:scale-95 transition"
-            title={isPlaying ? "Pauza" : "Odtwórz"}
+            title={isPlaying && !isLoadingAudio ? "Pauza" : "Odtwórz"}
           >
-            {isPlaying ? (
+            {isPlaying && !isLoadingAudio ? (
               <Pause className="h-4 w-4 fill-black" />
             ) : (
               <Play className="h-4 w-4 fill-black ml-0.5" />
