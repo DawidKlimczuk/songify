@@ -153,7 +153,7 @@ export default function AudioEngine() {
               width: "1",
               videoId: data.videoId,
               playerVars: {
-                autoplay: isPlaying && isAudioHost ? 1 : 0,
+                autoplay: 0,
                 controls: 0,
                 disablekb: 1,
                 fs: 0,
@@ -173,12 +173,12 @@ export default function AudioEngine() {
                     event.target.seekTo(initialTime, true);
                   }
 
-                  // Graj tylko wtedy, gdy użytkownik świadomie wcisnął Play LUB sieć nakazała granie!
                   if (isPlaying && isAudioHost) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
                     event.target.pauseVideo();
+                    setIsPlaying(false);
                   }
                 },
                 onStateChange: (event: any) => {
