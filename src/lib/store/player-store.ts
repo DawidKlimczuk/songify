@@ -28,7 +28,7 @@ interface PlayerState {
   seekTarget: number | null;
   isAddToPlaylistOpen: boolean;
 
-  setCurrentTrack: (track: Track, newQueue?: Track[]) => void;
+  setCurrentTrack: (track: Track, newQueue?: Track[], autoPlay?: boolean) => void;
   setQueue: (queue: Track[]) => void;
   reorderQueue: (startIndex: number, endIndex: number) => void;
   removeFromQueue: (index: number) => void;
@@ -93,7 +93,7 @@ export const usePlayerStore = create<PlayerState>()(
       sleepTimerEndsAt: null,
       sleepTimerMode: null,
 
-      setCurrentTrack: (track, newQueue) => {
+      setCurrentTrack: (track, newQueue, autoPlay = true) => {
         const state = get();
         const current = state.currentTrack;
         const history = current ? [...state.history, current] : state.history;
@@ -127,7 +127,7 @@ export const usePlayerStore = create<PlayerState>()(
           originalQueue: sourceQueue,
           history,
           radioSeedArtist: seed,
-          isPlaying: true,
+          isPlaying: autoPlay,
           isLiked: false,
           currentTime: 0,
           duration: track.duration || 0,

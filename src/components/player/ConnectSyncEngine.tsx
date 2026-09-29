@@ -12,6 +12,7 @@ export default function ConnectSyncEngine() {
   const isHandlingRemoteActionRef = useRef<boolean>(false);
   const isSeekingGuardRef = useRef<boolean>(false);
   const isInitialSyncGracePeriodRef = useRef<boolean>(true);
+  const isInitialMountRef = useRef<boolean>(true);
   const lastTrackIdSentRef = useRef<string | null>(null);
 
   const {
@@ -94,11 +95,9 @@ export default function ConnectSyncEngine() {
 
         const pState = usePlayerStore.getState();
         const dState = useDeviceStore.getState();
-        const amIPlaying = pState.isPlaying;
-        const amIActiveHost = dState.activeDeviceId === deviceId;
 
-        // Jeśli to na mnie aktualnie leci muzyka LUB jestem oznaczony jako host
-        if ((amIPlaying || amIActiveHost) && pState.currentTrack) {
+        // Jeśli u mnie cokolwiek gra LUB mam wybrany utwór i jestem hostem
+        if (pState.currentTrack && (pState.isPlaying || dState.activeDeviceId === deviceId)) {
           channel.send({
             type: "broadcast",
             event: "PROVIDE_HOST_STATE",
@@ -125,7 +124,8 @@ export default function ConnectSyncEngine() {
         }
         if (payload.currentTrack) {
           lastTrackIdSentRef.current = payload.currentTrack.id;
-          setCurrentTrack(payload.currentTrack, payload.queue || []);
+          const shouldPlay = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
+          setCurrentTrack(payload.currentTrack, payload.queue || [], shouldPlay);
         }
         if (typeof payload.currentTime === "number") {
           setCurrentTime(payload.currentTime);
@@ -272,8 +272,22 @@ export default function ConnectSyncEngine() {
 
   // 4. Rozgłaszanie kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
-    if (isHandlingRemoteActionRef.current || !activeRealtimeChannel || !currentTrack) return;
-    if (onlineDevices.length <= 1) return; // Jeśli jesteśmy sami, nie dotykamy sieci!
+    // Ignoruj startowe wywołanie przy montowaniu komponentu
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+
+    if (
+      isHandlingRemoteActionRef.current ||
+      isInitialSyncGracePeriodRef.current ||
+      !activeRealtimeChannel ||
+      !currentTrack
+    ) {
+      return;
+    }
+
+    if (onlineDevices.length <= 1) return;
 
     activeRealtimeChannel.send({
       type: "broadcast",
