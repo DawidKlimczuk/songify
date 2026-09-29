@@ -139,6 +139,9 @@ export default function ConnectSyncEngine() {
           setIsPlaying(payload.isPlaying);
         }
 
+        // Zdalny ekran natychmiast odblokowuje kontrolki playera
+        usePlayerStore.getState().setIsLoadingAudio(false);
+
         setTimeout(() => {
           isHandlingRemoteActionRef.current = false;
         }, 500);

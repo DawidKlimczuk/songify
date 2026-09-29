@@ -135,7 +135,7 @@ export default function MiniPlayer() {
             className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-400 text-black shadow-md shadow-teal-400/20 hover:scale-105 active:scale-95 transition"
             title={isPlaying && !isLoadingAudio ? "Pauza" : "Odtwórz"}
           >
-            {isPlaying && !isLoadingAudio ? (
+            {isPlaying ? (
               <Pause className="h-4 w-4 fill-black" />
             ) : (
               <Play className="h-4 w-4 fill-black ml-0.5" />

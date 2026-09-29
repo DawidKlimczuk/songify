@@ -353,7 +353,7 @@ export default function FullPlayer() {
             }}
             className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/30 transition hover:scale-105 active:scale-95"
           >
-            {isPlaying && !isLoadingAudio ? (
+            {isPlaying ? (
               <Pause className="h-7 w-7 fill-black" />
             ) : (
               <Play className="h-7 w-7 fill-black ml-1" />
