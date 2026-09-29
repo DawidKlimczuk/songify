@@ -347,11 +347,13 @@ export default function FullPlayer() {
 
           {/* Play / Pause */}
           <button
-            onClick={togglePlay}
-            disabled={isLoadingAudio}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/30 transition hover:scale-105 active:scale-95 disabled:opacity-50"
+            onClick={() => {
+              if (isLoadingAudio) return;
+              togglePlay();
+            }}
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/30 transition hover:scale-105 active:scale-95"
           >
-            {isPlaying ? (
+            {isPlaying && !isLoadingAudio ? (
               <Pause className="h-7 w-7 fill-black" />
             ) : (
               <Play className="h-7 w-7 fill-black ml-1" />
@@ -524,7 +526,7 @@ export default function FullPlayer() {
                   onClick={togglePlay}
                   className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-400 text-black shadow-md shadow-teal-500/30 transition hover:scale-105 active:scale-90"
                 >
-                  {isPlaying ? (
+                  {isPlaying && !isLoadingAudio ? (
                     <Pause className="h-5 w-5 fill-black" />
                   ) : (
                     <Play className="h-5 w-5 fill-black ml-0.5" />
