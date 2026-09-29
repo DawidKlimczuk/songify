@@ -178,30 +178,31 @@ export default function AudioEngine() {
                     event.target.seekTo(initialTime, true);
                   }
 
-                  // Tylko aktywne urządzenie ma prawo odpalać dźwięk
-                  if (isPlaying && isAudioHost) {
+                  // Świeży odczyt bezpośrednio ze store'a, bez starych domknięć
+                  const shouldPlay = usePlayerStore.getState().isPlaying;
+
+                  if (shouldPlay && isAudioHost) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
-                    // Ciche zatrzymanie lokalnego playera bez rozsyłania pauzy do aplikacji/sieci
                     try {
                       event.target.pauseVideo();
                     } catch {}
+                    setIsPlaying(false);
                   }
                 },
                 onStateChange: (event: any) => {
                   if (!isAudioHost) return;
 
                   if (event.data === 1) {
-                    // PLAYING
-                    const currentlyPlayingInStore = usePlayerStore.getState().isPlaying;
+                    const shouldPlay = usePlayerStore.getState().isPlaying;
                     
-                    // Jeśli w aplikacji piosenka miała być zapauzowana (np. świeże wejście), 
-                    // a YouTube samowolnie odpalił bufor -> natychmiast go uciszamy i nie zmieniamy ikony!
-                    if (!currentlyPlayingInStore) {
+                    // Jeśli użytkownik sam nie kliknął Play, natychmiast pauzujemy Iframe i trzymamy ikonę Play
+                    if (!shouldPlay) {
                       try {
                         playerRef.current?.pauseVideo();
                       } catch {}
+                      setIsPlaying(false);
                       return;
                     }
 
@@ -215,7 +216,6 @@ export default function AudioEngine() {
                       }
                     }
                   } else if (event.data === 0) {
-                    // Sprawdzamy czy był aktywny tryb uśpienia na koniec utworu
                     const currentMode = usePlayerStore.getState().sleepTimerMode;
                     if (currentMode === "end_of_track") {
                       try {
@@ -227,7 +227,6 @@ export default function AudioEngine() {
                       return;
                     }
 
-                    // ENDED -> autoodtwarzanie następnego
                     try {
                       playerRef.current?.stopVideo?.();
                     } catch {}

@@ -182,7 +182,8 @@ export default function ConnectSyncEngine() {
           case "SET_TRACK":
             if (payload.track) {
               lastTrackIdSentRef.current = payload.track.id;
-              setCurrentTrack(payload.track, payload.queue || [], true);
+              const shouldAutoPlay = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
+              setCurrentTrack(payload.track, payload.queue || [], shouldAutoPlay);
             }
             break;
 
