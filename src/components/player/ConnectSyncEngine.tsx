@@ -209,11 +209,12 @@ export default function ConnectSyncEngine() {
         if (!payload || payload.senderId === deviceId || isSeekingGuardRef.current) return;
 
         const currentActive = useDeviceStore.getState().activeDeviceId;
-        const amIHost = !currentActive || currentActive === deviceId;
+        // Jesteśmy klientem, jeśli wybrany host to inne urządzenie niż my
+        const isAnotherDeviceHost = currentActive && currentActive !== deviceId;
 
-        if (!amIHost && typeof payload.currentTime === "number") {
+        if (isAnotherDeviceHost && typeof payload.currentTime === "number") {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.8));
+          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.5));
           setCurrentTime(adjustedTime);
         }
       })
@@ -318,27 +319,33 @@ export default function ConnectSyncEngine() {
     });
   }, [isPlaying, deviceId, onlineDevices.length]);
 
-  // 5. Host rozsyła precyzyjny TICK czasu
+  // 5. Host rozsyła precyzyjny TICK czasu do wszystkich podłączonych urządzeń
   useEffect(() => {
-    if (!isCurrentHost || !isPlaying || !activeRealtimeChannel || !currentTrack) return;
+    const amITheHost = activeDeviceId ? activeDeviceId === deviceId : isCurrentHost;
+
+    if (!amITheHost || !isPlaying || !activeRealtimeChannel || !currentTrack) {
+      return;
+    }
 
     const interval = setInterval(() => {
       if (activeRealtimeChannel && !isHandlingRemoteActionRef.current) {
         const exactTime = usePlayerStore.getState().currentTime;
-        activeRealtimeChannel.send({
-          type: "broadcast",
-          event: "TIME_TICK",
-          payload: {
-            senderId: deviceId,
-            currentTime: exactTime,
-            sentAt: Date.now(),
-          },
-        });
+        if (typeof exactTime === "number" && !isNaN(exactTime)) {
+          activeRealtimeChannel.send({
+            type: "broadcast",
+            event: "TIME_TICK",
+            payload: {
+              senderId: deviceId,
+              currentTime: exactTime,
+              sentAt: Date.now(),
+            },
+          });
+        }
       }
-    }, 350);
+    }, 300);
 
     return () => clearInterval(interval);
-  }, [isCurrentHost, isPlaying, deviceId, currentTrack]);
+  }, [activeDeviceId, isCurrentHost, isPlaying, deviceId, currentTrack]);
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {
