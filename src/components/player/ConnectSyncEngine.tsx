@@ -223,6 +223,9 @@ export default function ConnectSyncEngine() {
         if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
           const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.3));
+          
+          // Aktualizujemy stan odtwarzacza na pilocie
+          setCurrentTime(adjustedTime);
           usePlayerStore.setState({ currentTime: adjustedTime });
         }
       })
@@ -332,20 +335,21 @@ export default function ConnectSyncEngine() {
 
   // 5. Host rozsyła precyzyjny TICK czasu do wszystkich podłączonych urządzeń
   useEffect(() => {
-    if (!activeRealtimeChannel) return;
-
     const interval = setInterval(() => {
       if (!activeRealtimeChannel) return;
 
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
+      // Jeśli muzyka nie gra, nie spamujemy sieci
       if (!pState.isPlaying || !pState.currentTrack) return;
 
-      // Sprawdzamy, czy to urządzenie jest aktualnym głośnikiem
-      const isTargetHost = Boolean(dState.activeDeviceId && dState.activeDeviceId === dState.deviceId);
-      const isFallbackHost = Boolean(!dState.activeDeviceId);
-      const amITheSpeaker = isTargetHost || isFallbackHost;
+      // Sprawdzamy, czy to urządzenie jest fizycznym głośnikiem:
+      // 1. Jeśli activeDeviceId jest ustawione, głośnikiem jest tylko to urządzenie
+      // 2. Jeśli activeDeviceId nie ma, wysyła urządzenie, które ma aktywny stan odtwarzania
+      const amITheSpeaker = dState.activeDeviceId
+        ? dState.activeDeviceId === dState.deviceId
+        : true;
 
       if (amITheSpeaker && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
         activeRealtimeChannel.send({
@@ -356,12 +360,12 @@ export default function ConnectSyncEngine() {
             currentTime: pState.currentTime,
             sentAt: Date.now(),
           },
-        });
+        }).catch?.(() => {});
       }
-    }, 250);
+    }, 300);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [deviceId, isPlaying]);
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {
