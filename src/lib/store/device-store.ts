@@ -2,7 +2,6 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { createClient } from "@/lib/supabase/client";
 
 export interface DeviceInfo {
   id: string;
@@ -46,6 +45,20 @@ function detectDeviceInfo(): { name: string; type: "computer" | "mobile" } {
   }
 }
 
+// Funkcja generująca w 100% unikalny ID dla tej konkretnej instancji przeglądarki
+function getOrCreateUniqueDeviceId(): string {
+  if (typeof window === "undefined") return "";
+  
+  // Najpierw sprawdzamy sessionStorage – nie podlega synchronizacji chmurowej
+  let localId = sessionStorage.getItem("songify_instance_device_id");
+  if (!localId) {
+    const prefix = /mobile|android|iphone/i.test(navigator.userAgent) ? "mob_" : "pc_";
+    localId = prefix + Math.random().toString(36).substring(2, 7) + "_" + Date.now().toString(36).slice(-4);
+    sessionStorage.setItem("songify_instance_device_id", localId);
+  }
+  return localId;
+}
+
 export const useDeviceStore = create<DeviceState>()(
   persist(
     (set, get) => ({
@@ -63,17 +76,14 @@ export const useDeviceStore = create<DeviceState>()(
       setVolume: (volume) => set({ volume }),
 
       initDevice: () => {
-        let currentId = get().deviceId;
-        if (!currentId) {
-          currentId = "dev_" + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
-        }
+        const uniqueId = getOrCreateUniqueDeviceId();
         const detected = detectDeviceInfo();
 
         set({
-          deviceId: currentId,
+          deviceId: uniqueId,
           deviceName: detected.name,
           deviceType: detected.type,
-          activeDeviceId: currentId, // Początkowo to urządzenie jest swoim hostem, dopóki sieć nie ustali inaczej
+          // activeDeviceId NIE jest wymuszane na dzień dobry, decyduje sieć Realtime
         });
       },
     }),
@@ -81,9 +91,7 @@ export const useDeviceStore = create<DeviceState>()(
       name: "songify_device_state",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        deviceId: state.deviceId,
-        deviceName: state.deviceName,
-        deviceType: state.deviceType,
+        // NIE zapisujemy deviceId w localStorage, aby profil Google nie synchronizował go na drugie urządzenie!
         volume: state.volume,
       }),
     }
