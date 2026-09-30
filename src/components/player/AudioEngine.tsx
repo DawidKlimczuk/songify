@@ -42,11 +42,13 @@ export default function AudioEngine() {
   // Sprawdzamy, czy to urządzenie jest wybranym hostem audio
   const { deviceId, activeDeviceId, volume, onlineDevices } = useDeviceStore();
   
-  // Jeśli w sieci jest więcej niż 1 urządzenie i nie jesteśmy jawnie wybrani jako host -> NIE gramy lokalnie
-  const hasOtherDevices = onlineDevices && onlineDevices.length > 1;
-  const isAudioHost = activeDeviceId
-    ? activeDeviceId === deviceId
-    : !hasOtherDevices;
+  // Jeśli istnieje wybrany host -> sprawdzamy czy to my.
+  // Jeśli activeDeviceId jeszcze nie ma:
+  // - gra tylko urządzenie, które ma już potwierdzone odtwarzanie w store (np. telefon z którego przyszliśmy),
+  // - nowo otwarte urządzenie traktujemy jako klienta (nie odpala dźwięku na ślepo).
+  const isAudioHost = activeDeviceId 
+    ? activeDeviceId === deviceId 
+    : (onlineDevices.length <= 1);
 
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
@@ -179,17 +181,18 @@ export default function AudioEngine() {
                     event.target.seekTo(initialTime, true);
                   }
 
-                  // Świeży odczyt bezpośrednio ze store'a, bez starych domknięć
                   const shouldPlay = usePlayerStore.getState().isPlaying;
+                  const currentActive = useDeviceStore.getState().activeDeviceId;
+                  const amIReallyHost = currentActive ? currentActive === deviceId : isAudioHost;
 
-                  if (shouldPlay && isAudioHost) {
+                  if (shouldPlay && amIReallyHost) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
                     try {
+                      event.target.setVolume(0);
                       event.target.pauseVideo();
                     } catch {}
-                    setIsPlaying(false);
                   }
                 },
                 onStateChange: (event: any) => {
@@ -335,10 +338,19 @@ export default function AudioEngine() {
       playerRef.current &&
       typeof playerRef.current.seekTo === "function"
     ) {
-      playerRef.current.seekTo(seekTarget, true);
+      // Jeśli to urządzenie NIE jest hostem dźwięku, przewijamy cicho bez wznawiania odtwarzacza
+      if (!isAudioHost) {
+        try {
+          playerRef.current.seekTo(seekTarget, false);
+          playerRef.current.pauseVideo();
+        } catch {}
+      } else {
+        // Tylko fizyczny host dźwięku wznawia odtwarzanie po przewinięciu
+        playerRef.current.seekTo(seekTarget, true);
+      }
       resetSeek();
     }
-  }, [seekTarget, resetSeek]);
+  }, [seekTarget, isAudioHost, resetSeek]);
 
   // 6. Pętla synchronizacji pozycji i paska postępu
   useEffect(() => {
