@@ -181,7 +181,7 @@ export default function ConnectSyncEngine() {
               seekTo(payload.time);
               setTimeout(() => {
                 isSeekingGuardRef.current = false;
-              }, 1000);
+              }, 300);
             }
             break;
 
@@ -190,6 +190,8 @@ export default function ConnectSyncEngine() {
               lastTrackIdSentRef.current = payload.track.id;
               const shouldAutoPlay = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
               setCurrentTrack(payload.track, payload.queue || [], shouldAutoPlay);
+              setCurrentTime(0);
+              usePlayerStore.getState().setIsLoadingAudio(false);
             }
             break;
 
@@ -272,6 +274,7 @@ export default function ConnectSyncEngine() {
 
     lastTrackIdSentRef.current = currentTrack.id;
 
+    // Przekazujemy rzeczywisty stan odtwarzania hosta, aby pilot nie zamarł na pauzie
     activeRealtimeChannel.send({
       type: "broadcast",
       event: "CONNECT_COMMAND",
@@ -280,9 +283,10 @@ export default function ConnectSyncEngine() {
         type: "SET_TRACK",
         track: currentTrack,
         queue,
+        isPlaying,
       },
     });
-  }, [currentTrack?.id, queue, deviceId, onlineDevices.length]);
+  }, [currentTrack?.id, queue, deviceId, isPlaying, onlineDevices.length]);
 
   // 4. Rozgłaszanie kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
@@ -355,7 +359,7 @@ export default function ConnectSyncEngine() {
 
     const timeout = setTimeout(() => {
       isSeekingGuardRef.current = false;
-    }, 1000);
+    }, 300);
 
     return () => clearTimeout(timeout);
   }, [seekTarget, deviceId, onlineDevices.length]);
