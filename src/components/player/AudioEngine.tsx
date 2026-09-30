@@ -461,49 +461,65 @@ export default function AudioEngine() {
       return;
     }
 
-    // Urządzenie przejmuje dźwięk
+    // To urządzenie staje się fizycznym głośnikiem
     userInitiatedPlayRef.current = true;
     const shouldPlay = usePlayerStore.getState().isPlaying;
-
     if (!shouldPlay) return;
 
     const exactSec = usePlayerStore.getState().currentTime || 0;
-    let hasSeeked = false;
+    let hasTriggered = false;
 
     const startHostPlayback = () => {
-      if (!playerRef.current || hasSeeked) return;
-      hasSeeked = true;
+      if (!playerRef.current || hasTriggered) return;
+      hasTriggered = true;
 
       try {
         const curVol = useDeviceStore.getState().volume ?? 100;
         if (typeof playerRef.current.setVolume === "function") {
           playerRef.current.setVolume(curVol);
         }
-        if (exactSec > 0 && typeof playerRef.current.seekTo === "function") {
-          playerRef.current.seekTo(exactSec, true);
+
+        // Pobieramy ID wideo z odtwarzacza lub streamu
+        const playerState = typeof playerRef.current.getPlayerState === "function" 
+          ? playerRef.current.getPlayerState() 
+          : -1;
+
+        // Jeśli odtwarzacz był w stanie CUED (5) lub niegrającym, wymuszamy odpalenie
+        if (playerState === 5 || playerState === -1 || playerState === 2) {
+          if (typeof playerRef.current.seekTo === "function") {
+            playerRef.current.seekTo(exactSec, true);
+          }
+          if (typeof playerRef.current.playVideo === "function") {
+            playerRef.current.playVideo();
+          }
+        } else {
+          if (exactSec > 0 && typeof playerRef.current.seekTo === "function") {
+            playerRef.current.seekTo(exactSec, true);
+          }
+          if (typeof playerRef.current.playVideo === "function") {
+            playerRef.current.playVideo();
+          }
         }
-        if (typeof playerRef.current.playVideo === "function") {
-          playerRef.current.playVideo();
-        }
+
         silentAudioRef.current?.play().catch(() => {});
         setIsPlaying(true);
       } catch (err) {
-        console.warn("Błąd wznowienia na nowym hoście:", err);
+        console.warn("Błąd startu audio po handoffie:", err);
       }
     };
 
-    if (isReadyRef.current) {
+    if (isReadyRef.current && playerRef.current) {
       startHostPlayback();
     } else {
       const checkInterval = setInterval(() => {
-        if (isReadyRef.current) {
+        if (isReadyRef.current && playerRef.current) {
           clearInterval(checkInterval);
           startHostPlayback();
         }
       }, 50);
       return () => clearInterval(checkInterval);
     }
-  }, [isAudioHost, activeDeviceId, deviceId, setIsPlaying]);
+  }, [isAudioHost, activeDeviceId, deviceId, currentTrack?.id, setIsPlaying]);
 
   // 9. Płynna zmiana głośności bez wpływu na strumień
   useEffect(() => {

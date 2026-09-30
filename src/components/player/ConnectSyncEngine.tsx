@@ -162,9 +162,6 @@ export default function ConnectSyncEngine() {
 
             if (typeof payload.currentTime === "number") {
               setCurrentTime(payload.currentTime);
-              if (payload.targetDeviceId === useDeviceStore.getState().deviceId) {
-                seekTo(payload.currentTime);
-              }
             }
             setIsPlaying(true);
             usePlayerStore.getState().setIsPlaying(true);
