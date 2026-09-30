@@ -183,12 +183,12 @@ export default function ConnectSyncEngine() {
 
           case "SEEK_TO":
             if (typeof payload.time === "number") {
-              isSeekingGuardRef.current = true;
               setCurrentTime(payload.time);
-              seekTo(payload.time);
-              setTimeout(() => {
-                isSeekingGuardRef.current = false;
-              }, 300);
+              usePlayerStore.setState({ currentTime: payload.time });
+              // Jeśli to my jesteśmy głośnikiem, natychmiast przewijamy odtwarzacz
+              if (useDeviceStore.getState().activeDeviceId === useDeviceStore.getState().deviceId) {
+                seekTo(payload.time);
+              }
             }
             break;
 
@@ -218,13 +218,11 @@ export default function ConnectSyncEngine() {
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
         const myId = useDeviceStore.getState().deviceId;
         if (!payload || payload.senderId === myId) return;
-        if (isSeekingGuardRef.current) return;
 
         if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
           const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.3));
           
-          // Aktualizujemy stan odtwarzacza na pilocie
           setCurrentTime(adjustedTime);
           usePlayerStore.setState({ currentTime: adjustedTime });
         }
@@ -369,10 +367,7 @@ export default function ConnectSyncEngine() {
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {
-    if (seekTarget === null || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
-    if (onlineDevices.length <= 1) return;
-
-    isSeekingGuardRef.current = true;
+    if (seekTarget === null || !activeRealtimeChannel) return;
 
     activeRealtimeChannel.send({
       type: "broadcast",
@@ -384,12 +379,9 @@ export default function ConnectSyncEngine() {
       },
     });
 
-    const timeout = setTimeout(() => {
-      isSeekingGuardRef.current = false;
-    }, 300);
-
-    return () => clearTimeout(timeout);
-  }, [seekTarget, deviceId, onlineDevices.length]);
+    // Czyścimy seekTarget na urządzeniu wysyłającym, żeby nie wisiał w stanie
+    usePlayerStore.getState().resetSeek();
+  }, [seekTarget, deviceId]);
 
   return null;
 }

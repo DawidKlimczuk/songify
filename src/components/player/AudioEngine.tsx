@@ -464,7 +464,7 @@ export default function AudioEngine() {
       return;
     }
 
-    // To urządzenie staje się fizycznym głośnikiem
+    // Urządzenie staje się fizycznym głośnikiem
     userInitiatedPlayRef.current = true;
     const shouldPlay = usePlayerStore.getState().isPlaying;
     if (!shouldPlay) return;
@@ -482,30 +482,18 @@ export default function AudioEngine() {
           playerRef.current.setVolume(curVol);
         }
 
-        // Pobieramy ID wideo z odtwarzacza lub streamu
-        const playerState = typeof playerRef.current.getPlayerState === "function" 
-          ? playerRef.current.getPlayerState() 
-          : -1;
-
-        // Jeśli odtwarzacz był w stanie CUED (5) lub niegrającym, wymuszamy odpalenie
-        if (playerState === 5 || playerState === -1 || playerState === 2) {
-          if (typeof playerRef.current.seekTo === "function") {
-            playerRef.current.seekTo(exactSec, true);
-          }
-          if (typeof playerRef.current.playVideo === "function") {
-            playerRef.current.playVideo();
-          }
-        } else {
-          if (exactSec > 0 && typeof playerRef.current.seekTo === "function") {
-            playerRef.current.seekTo(exactSec, true);
-          }
-          if (typeof playerRef.current.playVideo === "function") {
-            playerRef.current.playVideo();
-          }
+        // Jeśli odtwarzacz ma funkcję loadVideoById, to jest to najbardziej niezawodny sposób wznawiania
+        if (typeof playerRef.current.seekTo === "function") {
+          playerRef.current.seekTo(exactSec, true);
+        }
+        if (typeof playerRef.current.playVideo === "function") {
+          playerRef.current.playVideo();
         }
 
+        // Odpalamy kotwicę audio w tle
         silentAudioRef.current?.play().catch(() => {});
         setIsPlaying(true);
+        usePlayerStore.getState().setIsLoadingAudio(false);
       } catch (err) {
         console.warn("Błąd startu audio po handoffie:", err);
       }
@@ -522,7 +510,7 @@ export default function AudioEngine() {
       }, 50);
       return () => clearInterval(checkInterval);
     }
-  }, [isAudioHost, activeDeviceId, deviceId, currentTrack?.id, setIsPlaying]);
+  }, [activeDeviceId, deviceId, isAudioHost, setIsPlaying]);
 
   // 9. Płynna zmiana głośności bez wpływu na strumień
   useEffect(() => {
