@@ -158,9 +158,10 @@ export default function ConnectSyncEngine() {
         switch (payload.type) {
           case "SET_ACTIVE_DEVICE":
             setActiveDeviceId(payload.targetDeviceId);
+            useDeviceStore.setState({ activeDeviceId: payload.targetDeviceId });
+
             if (typeof payload.currentTime === "number") {
               setCurrentTime(payload.currentTime);
-              // Wywołaj seekTo tylko jeśli to my przejmujemy dźwięk
               if (payload.targetDeviceId === useDeviceStore.getState().deviceId) {
                 seekTo(payload.currentTime);
               }
@@ -343,12 +344,7 @@ export default function ConnectSyncEngine() {
 
       if (!pState.isPlaying) return;
 
-      // Sprawdzamy rolę urządzenia:
-      // Jeśli activeDeviceId jest ustawione, wysyła tylko to urządzenie.
-      // Jeśli activeDeviceId jeszcze nie ma, wysyła to, na którym piosenka gra.
-      const amIHost = dState.activeDeviceId
-        ? dState.activeDeviceId === deviceId
-        : true;
+      const amIHost = dState.activeDeviceId === deviceId || !dState.activeDeviceId;
 
       if (amIHost && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
         activeRealtimeChannel.send({
@@ -364,7 +360,7 @@ export default function ConnectSyncEngine() {
     }, 250);
 
     return () => clearInterval(interval);
-  }, [deviceId, currentTrack?.id]);
+  }, [deviceId, currentTrack?.id, activeDeviceId]);
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {

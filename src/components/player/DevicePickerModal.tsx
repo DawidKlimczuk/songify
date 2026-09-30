@@ -22,17 +22,11 @@ export default function DevicePickerModal() {
   const currentActive = onlineDevices.find((d) => d.id === activeDeviceId);
 
   const handleSelectDevice = (targetId: string) => {
-    if (activeDeviceId === targetId && usePlayerStore.getState().isPlaying) {
-      return;
-    }
-
-    // Pobieramy dokładny aktualny czas przed przełączeniem
     const currentSec = usePlayerStore.getState().currentTime || 0;
 
-    // Ustawiamy nowe urządzenie w lokalnym store
     setActiveDeviceId(targetId);
+    useDeviceStore.setState({ activeDeviceId: targetId });
 
-    // Wysyłamy polecenie przejęcia strumienia do drugiego urządzenia
     sendConnectCommand({
       type: "SET_ACTIVE_DEVICE",
       targetDeviceId: targetId,
