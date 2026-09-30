@@ -40,8 +40,13 @@ export default function AudioEngine() {
   } = usePlayerStore();
 
   // Sprawdzamy, czy to urządzenie jest wybranym hostem audio
-  const { deviceId, activeDeviceId, volume } = useDeviceStore();
-  const isAudioHost = !activeDeviceId || activeDeviceId === "" || deviceId === activeDeviceId;
+  const { deviceId, activeDeviceId, volume, onlineDevices } = useDeviceStore();
+  
+  // Jeśli w sieci jest więcej niż 1 urządzenie i nie jesteśmy jawnie wybrani jako host -> NIE gramy lokalnie
+  const hasOtherDevices = onlineDevices && onlineDevices.length > 1;
+  const isAudioHost = activeDeviceId
+    ? activeDeviceId === deviceId
+    : !hasOtherDevices;
 
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
