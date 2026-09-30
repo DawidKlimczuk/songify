@@ -311,10 +311,7 @@ export const usePlayerStore = create<PlayerState>()(
       },
 
       togglePlay: () => set((state) => ({ isPlaying: !state.isPlaying })),
-      setIsPlaying: (playing) => {
-        console.trace("[DEBUG SONGIFY] setIsPlaying wywołane z:", playing);
-        set({ isPlaying: playing });
-      },
+      setIsPlaying: (playing) => set({ isPlaying: playing }),
       setPlayerExpanded: (expanded) => set({ isPlayerExpanded: expanded }),
       setIsLiked: (isLiked) => set({ isLiked }),
       toggleShuffle: () => {
