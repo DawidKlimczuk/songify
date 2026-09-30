@@ -216,19 +216,18 @@ export default function ConnectSyncEngine() {
       })
       // E. Odbiór dokładnego postępu czasu z aktywnego hosta
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
-        // Ignoruj własne pakiety
+        // Ignorujemy tylko własne pakiety oraz moment przeciągania suwaka palcem
         if (!payload || payload.senderId === deviceId) return;
-
-        // Jeśli użytkownik na tym urządzeniu aktualnie przesuwa suwak palcem, nie przeszkadzamy mu
         if (isSeekingGuardRef.current) return;
 
-        // Jeśli lokalny YouTube NIE gra dźwięku, to jesteśmy klientem/pilotem i zawsze synchronizujemy czas
+        // Zawsze aktualizujemy czas, jeśli nadawca przysłał poprawną liczbę
         if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
           const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.4));
           setCurrentTime(adjustedTime);
         }
       })
+      
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           await channel.track({
@@ -334,9 +333,7 @@ export default function ConnectSyncEngine() {
 
   // 5. Host rozsyła precyzyjny TICK czasu do wszystkich podłączonych urządzeń
   useEffect(() => {
-    if (!isPlaying || !activeRealtimeChannel || !currentTrack) {
-      return;
-    }
+    if (!activeRealtimeChannel || !currentTrack) return;
 
     const interval = setInterval(() => {
       if (!activeRealtimeChannel) return;
@@ -344,10 +341,14 @@ export default function ConnectSyncEngine() {
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
-      // Urządzenie nadaje czas, jeśli jest aktywnym hostem LUB jeśli nikt nie jest wybrany, a piosenka gra
-      const isTargetHost = Boolean(dState.activeDeviceId && dState.activeDeviceId === deviceId);
-      const isDefaultHost = Boolean(!dState.activeDeviceId && pState.isPlaying);
-      const amIHost = isTargetHost || isDefaultHost;
+      if (!pState.isPlaying) return;
+
+      // Sprawdzamy rolę urządzenia:
+      // Jeśli activeDeviceId jest ustawione, wysyła tylko to urządzenie.
+      // Jeśli activeDeviceId jeszcze nie ma, wysyła to, na którym piosenka gra.
+      const amIHost = dState.activeDeviceId
+        ? dState.activeDeviceId === deviceId
+        : true;
 
       if (amIHost && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
         activeRealtimeChannel.send({
@@ -363,7 +364,7 @@ export default function ConnectSyncEngine() {
     }, 250);
 
     return () => clearInterval(interval);
-  }, [isPlaying, deviceId, currentTrack?.id, activeDeviceId]);
+  }, [deviceId, currentTrack?.id]);
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {

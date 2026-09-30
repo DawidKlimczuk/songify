@@ -22,22 +22,22 @@ export default function DevicePickerModal() {
   const currentActive = onlineDevices.find((d) => d.id === activeDeviceId);
 
   const handleSelectDevice = (targetId: string) => {
-    // Jeśli to urządzenie było już wybrane i gra, nic nie robimy
     if (activeDeviceId === targetId && usePlayerStore.getState().isPlaying) {
       return;
     }
 
-    setActiveDeviceId(targetId);
+    // Pobieramy dokładny aktualny czas przed przełączeniem
     const currentSec = usePlayerStore.getState().currentTime || 0;
 
+    // Ustawiamy nowe urządzenie w lokalnym store
+    setActiveDeviceId(targetId);
+
+    // Wysyłamy polecenie przejęcia strumienia do drugiego urządzenia
     sendConnectCommand({
       type: "SET_ACTIVE_DEVICE",
       targetDeviceId: targetId,
       currentTime: currentSec,
     });
-
-    // Wymuszamy, by pilot od razu wiedział, kto jest teraz źródłem dźwięku
-    useDeviceStore.getState().setActiveDeviceId(targetId);
   };
 
   const handleVolumeChange = (newVal: number) => {
