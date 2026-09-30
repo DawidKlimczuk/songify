@@ -135,7 +135,11 @@ export default function ConnectSyncEngine() {
         }
         if (typeof payload.currentTime === "number") {
           setCurrentTime(payload.currentTime);
-          seekTo(payload.currentTime);
+          // Tylko pilot aktualizuje czas, nie cofamy grającego Iframe
+          const isMeTheHost = payload.activeDeviceId === deviceId;
+          if (!isMeTheHost) {
+            usePlayerStore.setState({ currentTime: payload.currentTime });
+          }
         }
         if (typeof payload.isPlaying === "boolean") {
           setIsPlaying(payload.isPlaying);
@@ -160,12 +164,14 @@ export default function ConnectSyncEngine() {
             setActiveDeviceId(payload.targetDeviceId);
             useDeviceStore.setState({ activeDeviceId: payload.targetDeviceId });
 
-            // Czas ustawiamy tylko wtedy, gdy przekazano konkretną wartość liczbową
-            if (typeof payload.currentTime === "number" && payload.currentTime !== null) {
+            if (typeof payload.currentTime === "number") {
               setCurrentTime(payload.currentTime);
             }
-            setIsPlaying(true);
-            usePlayerStore.getState().setIsPlaying(true);
+            
+            // Zachowujemy stan isPlaying z komendy (jeśli była pauza, zostaje pauza)
+            const shouldStartPlaying = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
+            setIsPlaying(shouldStartPlaying);
+            usePlayerStore.getState().setIsPlaying(shouldStartPlaying);
             usePlayerStore.getState().setIsLoadingAudio(false);
             break;
 
@@ -247,14 +253,12 @@ export default function ConnectSyncEngine() {
           };
 
           askHost();
-          const retryAsk = setTimeout(askHost, 500);
-          const secondRetry = setTimeout(askHost, 1000);
+          const retryAsk = setTimeout(askHost, 600);
 
           setTimeout(() => {
             isInitialSyncGracePeriodRef.current = false;
             clearTimeout(retryAsk);
-            clearTimeout(secondRetry);
-          }, 2500);
+          }, 1500);
         }
       });
 
@@ -369,19 +373,24 @@ export default function ConnectSyncEngine() {
   useEffect(() => {
     if (seekTarget === null || !activeRealtimeChannel) return;
 
+    const targetTime = seekTarget;
+
+    // Natychmiast synchronizujemy czas lokalny z nową pozycją
+    setCurrentTime(targetTime);
+    usePlayerStore.setState({ currentTime: targetTime });
+
     activeRealtimeChannel.send({
       type: "broadcast",
       event: "CONNECT_COMMAND",
       payload: {
         senderId: deviceId,
         type: "SEEK_TO",
-        time: seekTarget,
+        time: targetTime,
       },
     });
 
-    // Czyścimy seekTarget na urządzeniu wysyłającym, żeby nie wisiał w stanie
     usePlayerStore.getState().resetSeek();
-  }, [seekTarget, deviceId]);
+  }, [seekTarget, deviceId, setCurrentTime]);
 
   return null;
 }
