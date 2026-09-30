@@ -185,12 +185,17 @@ export default function AudioEngine() {
                   const currentActive = useDeviceStore.getState().activeDeviceId;
                   const amIReallyHost = currentActive ? currentActive === deviceId : isAudioHost;
 
+                  // ZAWSZE ustawiamy realną głośność ze store'a, żeby odtwarzacz nie był wyciszony do zera!
+                  try {
+                    const currentVol = useDeviceStore.getState().volume ?? 100;
+                    event.target.setVolume(currentVol);
+                  } catch {}
+
                   if (shouldPlay && amIReallyHost) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
                     try {
-                      event.target.setVolume(0);
                       event.target.pauseVideo();
                     } catch {}
                   }
@@ -312,6 +317,11 @@ export default function AudioEngine() {
 
     try {
       if (isPlaying && isAudioHost) {
+        // Gwarancja: przed wznowieniem dźwięku upewniamy się, że głośność jest poprawna
+        if (typeof playerRef.current.setVolume === "function") {
+          const curVol = useDeviceStore.getState().volume ?? 100;
+          playerRef.current.setVolume(curVol);
+        }
         if (typeof playerRef.current.playVideo === "function") {
           playerRef.current.playVideo();
           silentAudioRef.current?.play().catch(() => {});
