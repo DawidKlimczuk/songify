@@ -69,6 +69,7 @@ export default function FullPlayer() {
   const [remainingTimerText, setRemainingTimerText] = useState<string | null>(null);
   const [selectedWheelMinutes, setSelectedWheelMinutes] = useState<number>(30);
   const wheelRef = useRef<HTMLDivElement>(null);
+  const [scrubbingTime, setScrubbingTime] = useState<number | null>(null);
 
   useEffect(() => {
     if (!sleepTimerEndsAt || sleepTimerMode !== "time") {
@@ -214,7 +215,8 @@ export default function FullPlayer() {
   };
 
   const isLongTitle = currentTrack.title.length > 20;
-  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const displayedTime = scrubbingTime !== null ? scrubbingTime : currentTime;
+  const progressPercent = duration > 0 ? (displayedTime / duration) * 100 : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-b from-[#0f1f24] via-[#090e11] to-[#090e11] px-6 py-6 text-white animate-in slide-in-from-bottom duration-300">
@@ -291,7 +293,7 @@ export default function FullPlayer() {
             <div className="absolute w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
               {/* Turkusowe podświetlenie odtworzonej części */}
               <div
-                className="h-full bg-teal-400 rounded-full transition-[width] duration-150"
+                className="h-full bg-teal-400 rounded-full transition-[width] duration-75"
                 style={{ width: `${Math.min(Math.max(progressPercent, 0), 100)}%` }}
               />
             </div>
@@ -302,14 +304,19 @@ export default function FullPlayer() {
               min={0}
               max={duration > 0 ? duration : 100}
               step="0.1"
-              value={currentTime}
-              onChange={(e) => seekTo(Number(e.target.value))}
+              value={displayedTime}
+              onInput={(e) => setScrubbingTime(Number((e.target as HTMLInputElement).value))}
+              onChange={(e) => {
+                const targetSec = Number(e.target.value);
+                setScrubbingTime(null);
+                seekTo(targetSec);
+              }}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
             />
 
             {/* Kropka (Thumb) podążająca za paskiem */}
             <div
-              className="absolute h-3.5 w-3.5 -ml-1.5 rounded-full bg-teal-400 shadow-md shadow-teal-500/50 pointer-events-none transition-[left] duration-150"
+              className="absolute h-3.5 w-3.5 -ml-1.5 rounded-full bg-teal-400 shadow-md shadow-teal-500/50 pointer-events-none transition-[left] duration-75"
               style={{
                 left: `${Math.min(Math.max(progressPercent, 0), 100)}%`,
               }}
@@ -317,7 +324,7 @@ export default function FullPlayer() {
           </div>
 
           <div className="mt-1 flex justify-between text-[11px] font-mono text-gray-400">
-            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(displayedTime)}</span>
             <span>{formatTime(duration)}</span>
           </div>
         </div>

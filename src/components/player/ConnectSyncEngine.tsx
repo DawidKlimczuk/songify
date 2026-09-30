@@ -96,23 +96,17 @@ export default function ConnectSyncEngine() {
         const pState = usePlayerStore.getState();
         const dState = useDeviceStore.getState();
 
-        const amIActuallyPlaying = pState.isPlaying;
-        const amIDesignatedHost = dState.activeDeviceId === deviceId;
-        const noHostClaimedYet = !dState.activeDeviceId || dState.activeDeviceId === "";
-
-        if (pState.currentTrack && (amIActuallyPlaying || amIDesignatedHost || noHostClaimedYet)) {
-          // Zapewniamy, że grające urządzenie ma jawnie przypisany status aktywnego hosta
-          const designatedHostId = amIActuallyPlaying ? deviceId : (dState.activeDeviceId || deviceId);
-          if (amIActuallyPlaying && dState.activeDeviceId !== deviceId) {
-            setActiveDeviceId(deviceId);
-          }
+        // Jeśli to urządzenie fizycznie gra dźwięk:
+        if (pState.currentTrack && pState.isPlaying) {
+          // Zawsze potwierdzamy w modalu, że to my jesteśmy wybranym hostem
+          setActiveDeviceId(deviceId);
 
           channel.send({
             type: "broadcast",
             event: "PROVIDE_HOST_STATE",
             payload: {
               targetId: payload.senderId,
-              activeDeviceId: designatedHostId,
+              activeDeviceId: deviceId,
               currentTrack: pState.currentTrack,
               queue: pState.queue,
               isPlaying: pState.isPlaying,

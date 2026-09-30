@@ -40,15 +40,16 @@ export default function AudioEngine() {
   } = usePlayerStore();
 
   // Sprawdzamy, czy to urządzenie jest wybranym hostem audio
-  const { deviceId, activeDeviceId, volume, onlineDevices } = useDeviceStore();
-  
-  // Jeśli istnieje wybrany host -> sprawdzamy czy to my.
-  // Jeśli activeDeviceId jeszcze nie ma:
-  // - gra tylko urządzenie, które ma już potwierdzone odtwarzanie w store (np. telefon z którego przyszliśmy),
-  // - nowo otwarte urządzenie traktujemy jako klienta (nie odpala dźwięku na ślepo).
-  const isAudioHost = activeDeviceId 
-    ? activeDeviceId === deviceId 
-    : (onlineDevices.length <= 1);
+  const { deviceId, activeDeviceId, volume } = useDeviceStore();
+
+  // ZASADA MODALA / HOSTA:
+  // 1. Jeśli w modalu wybrano konkretne urządzenie -> gra tylko to urządzenie.
+  // 2. Jeśli jeszcze nic nie wybrano w modalu -> gra WYŁĄCZNIE urządzenie,
+  //    na którym użytkownik bezpośrednio kliknął Play (userInitiatedPlayRef).
+  //    Nowe urządzenie (np. PC otwarty w tle) jest wyłącznie pilotem!
+  const isAudioHost = activeDeviceId
+    ? activeDeviceId === deviceId
+    : Boolean(userInitiatedPlayRef.current);
 
   // 1. Ładowanie YouTube Iframe API oraz kotwicy audio dla grania w tle
   useEffect(() => {
@@ -310,6 +311,10 @@ export default function AudioEngine() {
   // 4. Obsługa kliknięcia Play / Pause przez użytkownika
   useEffect(() => {
     if (isPlaying) {
+      // Użytkownik kliknął Play na tym urządzeniu
+      if (!activeDeviceId) {
+        useDeviceStore.getState().setActiveDeviceId(deviceId);
+      }
       userInitiatedPlayRef.current = true;
     }
 
