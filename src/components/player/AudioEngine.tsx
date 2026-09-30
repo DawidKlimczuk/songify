@@ -380,7 +380,7 @@ export default function AudioEngine() {
           typeof playerRef.current.getCurrentTime === "function"
         ) {
           const cur = playerRef.current.getCurrentTime();
-          if (typeof cur === "number" && !isNaN(cur) && cur > 0) {
+          if (typeof cur === "number" && !isNaN(cur)) {
             setCurrentTime(cur);
           }
 

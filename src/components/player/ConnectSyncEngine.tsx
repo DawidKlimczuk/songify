@@ -157,9 +157,13 @@ export default function ConnectSyncEngine() {
             setActiveDeviceId(payload.targetDeviceId);
             if (typeof payload.currentTime === "number") {
               setCurrentTime(payload.currentTime);
-              seekTo(payload.currentTime);
+              // Wywołaj seekTo tylko jeśli to my przejmujemy dźwięk
+              if (payload.targetDeviceId === useDeviceStore.getState().deviceId) {
+                seekTo(payload.currentTime);
+              }
             }
             setIsPlaying(true);
+            usePlayerStore.getState().setIsLoadingAudio(false);
             break;
 
           case "SET_PLAYING":
@@ -204,17 +208,20 @@ export default function ConnectSyncEngine() {
           isHandlingRemoteActionRef.current = false;
         }, 300);
       })
-      // E. Odbiór dokładnego postępu czasu
+      // E. Odbiór dokładnego postępu czasu z aktywnego hosta
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
-        if (!payload || payload.senderId === deviceId || isSeekingGuardRef.current) return;
+        if (!payload || payload.senderId === deviceId) return;
+
+        // Jeśli użytkownik właśnie przesuwa suwak palcem, nie nadpisujemy
+        if (isSeekingGuardRef.current) return;
 
         const currentActive = useDeviceStore.getState().activeDeviceId;
-        // Jesteśmy klientem, jeśli wybrany host to inne urządzenie niż my
-        const isAnotherDeviceHost = currentActive && currentActive !== deviceId;
+        const myId = useDeviceStore.getState().deviceId;
+        const isClient = currentActive ? currentActive !== myId : false;
 
-        if (isAnotherDeviceHost && typeof payload.currentTime === "number") {
+        if (isClient && typeof payload.currentTime === "number") {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.5));
+          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.4));
           setCurrentTime(adjustedTime);
         }
       })
