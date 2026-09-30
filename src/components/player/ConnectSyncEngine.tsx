@@ -410,3 +410,18 @@ export async function sendConnectCommand(command: {
     });
   }
 }
+
+export function broadcastTimeTick(time: number) {
+  if (activeRealtimeChannel) {
+    const devId = useDeviceStore.getState().deviceId;
+    activeRealtimeChannel.send({
+      type: "broadcast",
+      event: "TIME_TICK",
+      payload: {
+        senderId: devId,
+        currentTime: time,
+        sentAt: Date.now(),
+      },
+    });
+  }
+}

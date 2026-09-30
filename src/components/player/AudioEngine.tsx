@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import { useDeviceStore } from "@/lib/store/device-store";
+import { broadcastTimeTick } from "./ConnectSyncEngine";
 
 declare global {
   interface Window {
@@ -374,6 +375,8 @@ export default function AudioEngine() {
             const cur = playerRef.current.getCurrentTime();
             if (typeof cur === "number" && !isNaN(cur)) {
               setCurrentTime(cur);
+              // Skoro fizycznie gramy dźwięk tutaj, natychmiast wysyłamy ten czas do drugiego urządzenia!
+              broadcastTimeTick(cur);
             }
 
             let currentDuration = duration;
