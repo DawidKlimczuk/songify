@@ -22,15 +22,18 @@ export default function DevicePickerModal() {
   const currentActive = onlineDevices.find((d) => d.id === activeDeviceId);
 
   const handleSelectDevice = (targetId: string) => {
+    const isTargetMe = targetId === deviceId;
     const currentSec = usePlayerStore.getState().currentTime || 0;
 
     setActiveDeviceId(targetId);
     useDeviceStore.setState({ activeDeviceId: targetId });
 
+    // Jeśli to my przejmujemy dźwięk od innego urządzenia, NIE wysyłamy swojego
+    // starego czasu, lecz pozwalamy grającemu urządzeniu podać aktualny stan
     sendConnectCommand({
       type: "SET_ACTIVE_DEVICE",
       targetDeviceId: targetId,
-      currentTime: currentSec,
+      currentTime: isTargetMe ? null : currentSec,
     });
   };
 

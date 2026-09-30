@@ -160,7 +160,8 @@ export default function ConnectSyncEngine() {
             setActiveDeviceId(payload.targetDeviceId);
             useDeviceStore.setState({ activeDeviceId: payload.targetDeviceId });
 
-            if (typeof payload.currentTime === "number") {
+            // Czas ustawiamy tylko wtedy, gdy przekazano konkretną wartość liczbową
+            if (typeof payload.currentTime === "number" && payload.currentTime !== null) {
               setCurrentTime(payload.currentTime);
             }
             setIsPlaying(true);
@@ -215,15 +216,14 @@ export default function ConnectSyncEngine() {
       })
       // E. Odbiór dokładnego postępu czasu z aktywnego hosta
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
-        // Ignorujemy tylko własne pakiety oraz moment przeciągania suwaka palcem
-        if (!payload || payload.senderId === deviceId) return;
+        const myId = useDeviceStore.getState().deviceId;
+        if (!payload || payload.senderId === myId) return;
         if (isSeekingGuardRef.current) return;
 
-        // Zawsze aktualizujemy czas, jeśli nadawca przysłał poprawną liczbę
         if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.4));
-          setCurrentTime(adjustedTime);
+          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.3));
+          usePlayerStore.setState({ currentTime: adjustedTime });
         }
       })
       
@@ -332,7 +332,7 @@ export default function ConnectSyncEngine() {
 
   // 5. Host rozsyła precyzyjny TICK czasu do wszystkich podłączonych urządzeń
   useEffect(() => {
-    if (!activeRealtimeChannel || !currentTrack) return;
+    if (!activeRealtimeChannel) return;
 
     const interval = setInterval(() => {
       if (!activeRealtimeChannel) return;
@@ -340,16 +340,19 @@ export default function ConnectSyncEngine() {
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
-      if (!pState.isPlaying) return;
+      if (!pState.isPlaying || !pState.currentTrack) return;
 
-      const amIHost = dState.activeDeviceId === deviceId || !dState.activeDeviceId;
+      // Sprawdzamy, czy to urządzenie jest aktualnym głośnikiem
+      const isTargetHost = Boolean(dState.activeDeviceId && dState.activeDeviceId === dState.deviceId);
+      const isFallbackHost = Boolean(!dState.activeDeviceId);
+      const amITheSpeaker = isTargetHost || isFallbackHost;
 
-      if (amIHost && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
+      if (amITheSpeaker && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
         activeRealtimeChannel.send({
           type: "broadcast",
           event: "TIME_TICK",
           payload: {
-            senderId: deviceId,
+            senderId: dState.deviceId,
             currentTime: pState.currentTime,
             sentAt: Date.now(),
           },
@@ -358,7 +361,7 @@ export default function ConnectSyncEngine() {
     }, 250);
 
     return () => clearInterval(interval);
-  }, [deviceId, currentTrack?.id, activeDeviceId]);
+  }, []);
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {
