@@ -83,10 +83,13 @@ export default function ConnectSyncEngine() {
 
         setOnlineDevices(devices);
 
-        // Jeśli wybrany host odpiął się z sieci, przejmij rolę hosta lokalnie
+        // Przejmujemy hosta tylko wtedy, gdy w sieci realnie nikogo innego już nie ma
         const currentActive = useDeviceStore.getState().activeDeviceId;
-        if (currentActive && !devices.some((d) => d.id === currentActive)) {
-          setActiveDeviceId(deviceId);
+        if (currentActive && currentActive !== deviceId) {
+          const hostStillPresent = devices.some((d) => d.id === currentActive);
+          if (!hostStillPresent && devices.length === 1) {
+            setActiveDeviceId(deviceId);
+          }
         }
       })
       // B. Ktoś wszedł i pyta o aktualnie odtwarzany utwór
@@ -213,16 +216,14 @@ export default function ConnectSyncEngine() {
       })
       // E. Odbiór dokładnego postępu czasu z aktywnego hosta
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
+        // Ignoruj własne pakiety
         if (!payload || payload.senderId === deviceId) return;
 
-        // Jeśli użytkownik właśnie przesuwa suwak palcem, nie nadpisujemy
+        // Jeśli użytkownik na tym urządzeniu aktualnie przesuwa suwak palcem, nie przeszkadzamy mu
         if (isSeekingGuardRef.current) return;
 
-        const currentActive = useDeviceStore.getState().activeDeviceId;
-        const myId = useDeviceStore.getState().deviceId;
-        const isClient = currentActive ? currentActive !== myId : false;
-
-        if (isClient && typeof payload.currentTime === "number") {
+        // Jeśli lokalny YouTube NIE gra dźwięku, to jesteśmy klientem/pilotem i zawsze synchronizujemy czas
+        if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
           const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.4));
           setCurrentTime(adjustedTime);
@@ -343,11 +344,8 @@ export default function ConnectSyncEngine() {
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
-      // Urządzenie jest uprawnione do nadawania czasu, jeśli jest wybranym hostem
-      // lub jeśli żaden host nie został wybrany, a to urządzenie odtwarza dźwięk
-      const amIHost = dState.activeDeviceId
-        ? dState.activeDeviceId === deviceId
-        : pState.isPlaying;
+      // Jeśli jesteśmy wybranym hostem lub odtwarzamy dźwięk:
+      const amIHost = dState.activeDeviceId === deviceId || (!dState.activeDeviceId && pState.isPlaying);
 
       if (amIHost && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
         activeRealtimeChannel.send({
@@ -363,7 +361,7 @@ export default function ConnectSyncEngine() {
     }, 250);
 
     return () => clearInterval(interval);
-  }, [isPlaying, deviceId, currentTrack]);
+  }, [isPlaying, deviceId, currentTrack?.id, activeDeviceId]);
 
   // 6. Rozgłaszanie przewijania piosenki (Seek)
   useEffect(() => {
