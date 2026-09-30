@@ -167,6 +167,7 @@ export default function ConnectSyncEngine() {
               }
             }
             setIsPlaying(true);
+            usePlayerStore.getState().setIsPlaying(true);
             usePlayerStore.getState().setIsLoadingAudio(false);
             break;
 

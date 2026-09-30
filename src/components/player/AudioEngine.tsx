@@ -42,11 +42,6 @@ export default function AudioEngine() {
   // Sprawdzamy, czy to urządzenie jest wybranym hostem audio
   const { deviceId, activeDeviceId, volume } = useDeviceStore();
 
-  // ZASADA MODALA / HOSTA:
-  // 1. Jeśli w modalu wybrano konkretne urządzenie -> gra tylko to urządzenie.
-  // 2. Jeśli jeszcze nic nie wybrano w modalu -> gra WYŁĄCZNIE urządzenie,
-  //    na którym użytkownik bezpośrednio kliknął Play (userInitiatedPlayRef).
-  //    Nowe urządzenie (np. PC otwarty w tle) jest wyłącznie pilotem!
   const isAudioHost = activeDeviceId
     ? activeDeviceId === deviceId
     : Boolean(userInitiatedPlayRef.current);
@@ -202,19 +197,11 @@ export default function AudioEngine() {
                   }
                 },
                 onStateChange: (event: any) => {
-                  if (!isAudioHost) return;
+                  const currentActive = useDeviceStore.getState().activeDeviceId;
+                  const amITheHost = currentActive ? currentActive === deviceId : isAudioHost;
+                  if (!amITheHost) return;
 
                   if (event.data === 1) {
-                    // BLOKADA: jeśli użytkownik nie zainicjował kliknięcia od startu, uciszamy YouTube
-                    if (!userInitiatedPlayRef.current && !usePlayerStore.getState().isPlaying) {
-                      try {
-                        playerRef.current?.pauseVideo();
-                      } catch {}
-                      setIsPlaying(false);
-                      setIsLoadingAudio(false);
-                      return;
-                    }
-
                     setIsPlaying(true);
                     silentAudioRef.current?.play().catch(() => {});
                     setIsLoadingAudio(false);
@@ -424,7 +411,7 @@ export default function AudioEngine() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isPlaying, isAudioHost, duration, setCurrentTime, setDuration]);
-  
+
   // 7. Obsługa Sleep Timera (płynny Fade-out i automatyczna pauza)
   useEffect(() => {
     if (!sleepTimerEndsAt || sleepTimerMode !== "time") return;
@@ -461,29 +448,25 @@ export default function AudioEngine() {
 
   // 8. Czysty Handoff bez nakładania się dźwięku i przycinek
   useEffect(() => {
-    if (!isAudioHost) {
+    const currentActive = useDeviceStore.getState().activeDeviceId;
+    const amITheHost = currentActive ? currentActive === deviceId : isAudioHost;
+
+    if (!amITheHost) {
       try {
-        if (playerRef.current) {
-          if (typeof playerRef.current.setVolume === "function") {
-            playerRef.current.setVolume(0);
-          }
-          if (typeof playerRef.current.pauseVideo === "function") {
-            playerRef.current.pauseVideo();
-          }
+        if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
+          playerRef.current.pauseVideo();
         }
         silentAudioRef.current?.pause();
       } catch {}
       return;
     }
 
-    // Jeśli w aplikacji piosenka jest na pauzie (np. wejście do aplikacji),
-    // pod żadnym pozorem nie uruchamiamy samowolnego odtwarzania!
+    // Urządzenie przejmuje dźwięk
+    userInitiatedPlayRef.current = true;
     const shouldPlay = usePlayerStore.getState().isPlaying;
-    if (!shouldPlay) {
-      return;
-    }
 
-    // Nowy host przejmuje aktywny strumień tylko wtedy, gdy muzyka faktycznie gra
+    if (!shouldPlay) return;
+
     const exactSec = usePlayerStore.getState().currentTime || 0;
     let hasSeeked = false;
 
@@ -492,7 +475,7 @@ export default function AudioEngine() {
       hasSeeked = true;
 
       try {
-        const curVol = useDeviceStore.getState().volume;
+        const curVol = useDeviceStore.getState().volume ?? 100;
         if (typeof playerRef.current.setVolume === "function") {
           playerRef.current.setVolume(curVol);
         }
@@ -520,7 +503,7 @@ export default function AudioEngine() {
       }, 50);
       return () => clearInterval(checkInterval);
     }
-  }, [isAudioHost, setIsPlaying]);
+  }, [isAudioHost, activeDeviceId, deviceId, setIsPlaying]);
 
   // 9. Płynna zmiana głośności bez wpływu na strumień
   useEffect(() => {
