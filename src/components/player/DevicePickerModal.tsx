@@ -22,9 +22,8 @@ export default function DevicePickerModal() {
   const currentActive = onlineDevices.find((d) => d.id === activeDeviceId);
 
   const handleSelectDevice = (targetId: string) => {
-    // Jeśli kliknięto w aktualnie aktywne urządzenie, upewnij się tylko że gra
-    if (activeDeviceId === targetId) {
-      usePlayerStore.getState().setIsPlaying(true);
+    // Jeśli to urządzenie było już wybrane i gra, nic nie robimy
+    if (activeDeviceId === targetId && usePlayerStore.getState().isPlaying) {
       return;
     }
 
@@ -36,6 +35,9 @@ export default function DevicePickerModal() {
       targetDeviceId: targetId,
       currentTime: currentSec,
     });
+
+    // Wymuszamy, by pilot od razu wiedział, kto jest teraz źródłem dźwięku
+    useDeviceStore.getState().setActiveDeviceId(targetId);
   };
 
   const handleVolumeChange = (newVal: number) => {

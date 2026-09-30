@@ -339,13 +339,15 @@ export default function ConnectSyncEngine() {
     }
 
     const interval = setInterval(() => {
-      if (!activeRealtimeChannel || isHandlingRemoteActionRef.current) return;
+      if (!activeRealtimeChannel) return;
 
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
-      // Jeśli jesteśmy wybranym hostem lub odtwarzamy dźwięk:
-      const amIHost = dState.activeDeviceId === deviceId || (!dState.activeDeviceId && pState.isPlaying);
+      // Urządzenie nadaje czas, jeśli jest aktywnym hostem LUB jeśli nikt nie jest wybrany, a piosenka gra
+      const isTargetHost = Boolean(dState.activeDeviceId && dState.activeDeviceId === deviceId);
+      const isDefaultHost = Boolean(!dState.activeDeviceId && pState.isPlaying);
+      const amIHost = isTargetHost || isDefaultHost;
 
       if (amIHost && typeof pState.currentTime === "number" && !isNaN(pState.currentTime)) {
         activeRealtimeChannel.send({

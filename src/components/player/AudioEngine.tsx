@@ -371,53 +371,60 @@ export default function AudioEngine() {
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current);
 
-    // Aktualizujemy czas ze strumienia Iframe TYLKO na urządzeniu, które faktycznie gra dźwięk
-    if (isPlaying && isAudioHost) {
+    if (isPlaying) {
       timerRef.current = setInterval(() => {
         if (
           isReadyRef.current &&
           playerRef.current &&
           typeof playerRef.current.getCurrentTime === "function"
         ) {
-          const cur = playerRef.current.getCurrentTime();
-          if (typeof cur === "number" && !isNaN(cur)) {
-            setCurrentTime(cur);
-          }
+          const isActuallyPlayingHere =
+            typeof playerRef.current.getPlayerState === "function"
+              ? playerRef.current.getPlayerState() === 1
+              : isAudioHost;
 
-          let currentDuration = duration;
-          if (typeof playerRef.current.getDuration === "function") {
-            const ytDur = playerRef.current.getDuration();
-            if (ytDur && ytDur > 0 && Math.abs(ytDur - duration) > 1) {
-              setDuration(ytDur);
-              currentDuration = ytDur;
+          if (isActuallyPlayingHere) {
+            const cur = playerRef.current.getCurrentTime();
+            if (typeof cur === "number" && !isNaN(cur)) {
+              setCurrentTime(cur);
+            }
+
+            let currentDuration = duration;
+            if (typeof playerRef.current.getDuration === "function") {
+              const ytDur = playerRef.current.getDuration();
+              if (ytDur && ytDur > 0 && Math.abs(ytDur - duration) > 1) {
+                setDuration(ytDur);
+                currentDuration = ytDur;
+              }
+            }
+
+            if (
+              typeof window !== "undefined" &&
+              "mediaSession" in navigator &&
+              "setPositionState" in navigator.mediaSession &&
+              !isNaN(currentDuration) &&
+              currentDuration > 0 &&
+              typeof cur === "number" &&
+              !isNaN(cur)
+            ) {
+              try {
+                navigator.mediaSession.setPositionState({
+                  duration: currentDuration,
+                  playbackRate: 1.0,
+                  position: Math.min(cur, currentDuration),
+                });
+              } catch (e) {}
             }
           }
-
-          if (
-            typeof window !== "undefined" &&
-            "mediaSession" in navigator &&
-            "setPositionState" in navigator.mediaSession &&
-            !isNaN(currentDuration) &&
-            currentDuration > 0 &&
-            !isNaN(cur)
-          ) {
-            try {
-              navigator.mediaSession.setPositionState({
-                duration: currentDuration,
-                playbackRate: 1.0,
-                position: Math.min(cur, currentDuration),
-              });
-            } catch (e) {}
-          }
         }
-      }, 350);
+      }, 250);
     }
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isPlaying, isAudioHost, duration, setCurrentTime, setDuration]);
-
+  
   // 7. Obsługa Sleep Timera (płynny Fade-out i automatyczna pauza)
   useEffect(() => {
     if (!sleepTimerEndsAt || sleepTimerMode !== "time") return;
