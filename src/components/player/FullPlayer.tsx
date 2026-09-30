@@ -327,11 +327,6 @@ export default function FullPlayer() {
             <span>{formatTime(displayedTime)}</span>
             <span>{formatTime(duration)}</span>
           </div>
-
-          {/* Wskaźnik diagnostyczny na ekranie */}
-          <div className="mt-1 text-center text-[10px] font-mono text-teal-400/80 bg-black/40 rounded-md py-0.5 border border-teal-900/40">
-            Ja: {deviceId?.slice(0, 5)} | Host: {activeDeviceId ? activeDeviceId.slice(0, 5) : "brak"} | Rola: {activeDeviceId === deviceId ? "GŁOŚNIK" : "PILOT"} | T: {Math.floor(currentTime)}s
-          </div>
         </div>
 
         <div className="flex items-center justify-between px-2">
