@@ -106,10 +106,10 @@ body {
 }
 
 @keyframes marqueeScroll {
-  0%, 15% {
+  0%, 4% {
     transform: translateX(0);
   }
-  85%, 100% {
+  96%, 100% {
     /* Przesuwa tekst o jego pełną długość w lewo, zostawiając bufor na widoku */
     transform: translateX(calc(-100% + 180px));
   }
