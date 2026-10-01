@@ -16,8 +16,8 @@ interface DeviceState {
   deviceType: "computer" | "mobile";
   activeDeviceId: string;
   onlineDevices: DeviceInfo[];
-  volume: number; // aktualnie wyświetlana głośność (aktywnego głośnika)
-  deviceVolumes: Record<string, number>; // mapa { [deviceId]: volume }
+  volume: number;
+  deviceVolumes: Record<string, number>;
   isDevicePickerOpen: boolean;
 
   setDevicePickerOpen: (open: boolean) => void;
@@ -49,7 +49,6 @@ function detectDeviceInfo(): { name: string; type: "computer" | "mobile" } {
 function getOrCreateUniqueDeviceId(): string {
   if (typeof window === "undefined") return "";
   
-  // Trzymamy ID w localStorage, aby to samo urządzenie nie zmieniało tożsamości po każdym zamknięciu karty
   let localId = localStorage.getItem("songify_persistent_device_id");
   if (!localId) {
     const prefix = /mobile|android|iphone/i.test(navigator.userAgent) ? "mob_" : "pc_";
@@ -59,15 +58,14 @@ function getOrCreateUniqueDeviceId(): string {
   return localId;
 }
 
-function getSavedHardwareVolume(): number {
-  if (typeof window === "undefined") return 40;
+export function getLocalHardwareVolume(): number {
+  if (typeof window === "undefined") return 50;
   const saved = localStorage.getItem("songify_hardware_volume");
   if (saved !== null) {
     const parsed = parseInt(saved, 10);
     if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) return parsed;
   }
-  // Bezpieczna wartość startowa (nie urwie uszu na głośnikach PC)
-  return 40;
+  return 50;
 }
 
 export const useDeviceStore = create<DeviceState>()(
@@ -78,17 +76,25 @@ export const useDeviceStore = create<DeviceState>()(
       deviceType: "computer",
       activeDeviceId: "",
       onlineDevices: [],
-      volume: 40,
+      volume: 50,
       deviceVolumes: {},
       isDevicePickerOpen: false,
 
       setDevicePickerOpen: (open) => set({ isDevicePickerOpen: open }),
       
       setActiveDeviceId: (id) => {
-        const { deviceVolumes, deviceId, volume } = get();
-        // Pobieramy zapamiętaną głośność przełączanego urządzenia
-        const targetVol = deviceVolumes[id] ?? (id === deviceId ? volume : 50);
-        set({ activeDeviceId: id, volume: targetVol });
+        const { deviceVolumes, deviceId } = get();
+        const myHardVol = getLocalHardwareVolume();
+
+        // Jeśli przełączamy na samego siebie – bierzemy twardy hardware volume
+        if (!id || id === deviceId) {
+          set({ activeDeviceId: id, volume: myHardVol });
+          return;
+        }
+
+        // Jeśli przełączamy na zdalne urządzenie – bierzemy jego zapamiętany stan lub obecny
+        const remoteVol = deviceVolumes[id] ?? get().volume;
+        set({ activeDeviceId: id, volume: remoteVol });
       },
 
       setOnlineDevices: (devices) => set({ onlineDevices: devices }),
@@ -97,7 +103,7 @@ export const useDeviceStore = create<DeviceState>()(
         const { activeDeviceId, deviceId, deviceVolumes } = get();
         const target = targetDeviceId || activeDeviceId || deviceId;
 
-        // Jeśli zmieniamy głośność tego fizycznego urządzenia, zapisujemy ją na twardo
+        // Jeśli suwak zmienia głośność tego urządzenia – ZAWSZE zapisujemy w localStorage
         if (target === deviceId) {
           try {
             localStorage.setItem("songify_hardware_volume", String(newVolume));
@@ -116,7 +122,7 @@ export const useDeviceStore = create<DeviceState>()(
       initDevice: () => {
         const uniqueId = getOrCreateUniqueDeviceId();
         const detected = detectDeviceInfo();
-        const hardVol = getSavedHardwareVolume();
+        const hardVol = getLocalHardwareVolume();
         const { deviceVolumes } = get();
 
         set({
@@ -136,7 +142,6 @@ export const useDeviceStore = create<DeviceState>()(
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
         deviceVolumes: state.deviceVolumes,
-        volume: state.volume,
       }),
     }
   )
