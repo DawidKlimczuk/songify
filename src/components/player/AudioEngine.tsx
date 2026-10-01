@@ -17,6 +17,7 @@ export default function AudioEngine() {
   const isReadyRef = useRef(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const activeTrackIdRef = useRef<string | null>(null);
+  const loadingTrackIdRef = useRef<string | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
   const silentAudioRef = useRef<HTMLAudioElement | null>(null);
   const userInitiatedPlayRef = useRef<boolean>(false);
@@ -115,19 +116,24 @@ export default function AudioEngine() {
     const isFirstAppLoad = isInitialMountRef.current;
     isInitialMountRef.current = false;
 
-    // Utwór jest zmieniony tylko wtedy, gdy to nie pierwsze wejście i ID się faktycznie różni
+    // Zapisujemy ID piosenki, którą WŁAŚNIE zaczynamy ładować
+    loadingTrackIdRef.current = currentTrack.id;
+
     const isDifferentTrack = !isFirstAppLoad && activeTrackIdRef.current !== currentTrack.id;
     activeTrackIdRef.current = currentTrack.id;
 
-    if (isDifferentTrack && isReadyRef.current && playerRef.current) {
+    // Jeśli zmieniamy utwór, BEZWZGLĘDNIE i natychmiast uciszamy cokolwiek, co gra lub mogłoby zagrać
+    if (playerRef.current) {
       try {
+        if (typeof playerRef.current.pauseVideo === "function") {
+          playerRef.current.pauseVideo();
+        }
         if (typeof playerRef.current.stopVideo === "function") {
           playerRef.current.stopVideo();
         }
-      } catch (err) {
-        console.warn("Błąd zatrzymywania poprzedniego utworu:", err);
-      }
+      } catch (err) {}
     }
+    silentAudioRef.current?.pause();
 
     setIsLoadingAudio(true);
 
@@ -191,11 +197,12 @@ export default function AudioEngine() {
                     event.target.setVolume(currentVol);
                   } catch {}
 
-                  const latestTrackId = usePlayerStore.getState().currentTrack?.id;
-                  const isTrackStillValid = latestTrackId === currentTrack.id;
+                  const latestState = usePlayerStore.getState();
+                  const isTrackStillValid = latestState.currentTrack?.id === currentTrack.id;
+                  const isLoadingNow = latestState.isLoadingAudio;
 
-                  // Odtwarzamy tylko wtedy, gdy w międzyczasie user nie przeklikał na inną piosenkę
-                  if (shouldPlay && amIReallyHost && isTrackStillValid) {
+                  // Odtwarzamy TYLKO wtedy, gdy ID jest wciąż aktualne I nie trwa ładowanie nowszego utworu
+                  if (shouldPlay && amIReallyHost && isTrackStillValid && !isLoadingNow) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
@@ -255,13 +262,20 @@ export default function AudioEngine() {
             });
           } else {
             // Player już istnieje
-            if (isPlaying && isAudioHost) {
+            const shouldAutoPlay = usePlayerStore.getState().isPlaying;
+            const currentActive = useDeviceStore.getState().activeDeviceId;
+            const amIReallyHost = currentActive ? currentActive === deviceId : isAudioHost;
+
+            if (shouldAutoPlay && amIReallyHost) {
               playerRef.current.loadVideoById({
                 videoId: data.videoId,
                 startSeconds: initialTime,
               });
-              playerRef.current.playVideo();
+              try {
+                playerRef.current.playVideo();
+              } catch {}
               silentAudioRef.current?.play().catch(() => {});
+              setIsLoadingAudio(false);
             } else {
               playerRef.current.cueVideoById({
                 videoId: data.videoId,
