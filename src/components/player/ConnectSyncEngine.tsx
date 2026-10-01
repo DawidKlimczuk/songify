@@ -193,8 +193,9 @@ export default function ConnectSyncEngine() {
       // D. Zdalne komendy
       .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
         const currentMyId = useDeviceStore.getState().deviceId;
-        if (!payload || payload.senderId === currentMyId || !currentMyId) return;
+        if (!payload || (payload.senderId && payload.senderId === currentMyId)) return;
 
+        console.log("[Songify Connect] Odebrano zdalną komendę:", payload.type, payload);
         isHandlingRemoteActionRef.current = true;
 
         switch (payload.type) {
@@ -476,9 +477,16 @@ export async function sendConnectCommand(command: {
   type: string;
   [key: string]: any;
 }) {
-  if (activeRealtimeChannel) {
-    const devId = useDeviceStore.getState().deviceId;
-    await activeRealtimeChannel.send({
+  const channel = activeRealtimeChannel;
+  const devId = useDeviceStore.getState().deviceId;
+
+  if (!channel) {
+    console.warn("[Songify Connect] Brak aktywnego kanału Realtime do wysłania komendy:", command);
+    return;
+  }
+
+  try {
+    await channel.send({
       type: "broadcast",
       event: "CONNECT_COMMAND",
       payload: {
@@ -486,6 +494,9 @@ export async function sendConnectCommand(command: {
         ...command,
       },
     });
+    console.log("[Songify Connect] Wysłano komendę:", command.type, command);
+  } catch (err) {
+    console.error("[Songify Connect] Błąd wysyłania komendy:", err);
   }
 }
 
