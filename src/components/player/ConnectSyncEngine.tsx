@@ -9,9 +9,8 @@ let activeRealtimeChannel: any = null;
 
 export default function ConnectSyncEngine() {
   const supabase = createClient();
-  const [userId, setUserId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const isHandlingRemoteActionRef = useRef<boolean>(false);
-  const isSeekingGuardRef = useRef<boolean>(false);
   const isInitialSyncGracePeriodRef = useRef<boolean>(true);
   const isInitialMountRef = useRef<boolean>(true);
   const lastTrackIdSentRef = useRef<string | null>(null);
@@ -22,7 +21,6 @@ export default function ConnectSyncEngine() {
     deviceType,
     activeDeviceId,
     onlineDevices,
-    volume,
     initDevice,
     setOnlineDevices,
     setActiveDeviceId,
@@ -43,18 +41,42 @@ export default function ConnectSyncEngine() {
     seekTo,
   } = usePlayerStore();
 
-  const isCurrentHost = !activeDeviceId || activeDeviceId === "" || activeDeviceId === deviceId;
-
-  // 1. Inicjalizacja tożsamości urządzenia
+  // 1. Inicjalizacja tożsamości urządzenia i pobranie usera
   useEffect(() => {
     initDevice();
-  }, [initDevice]);
 
-  // 2. Obsługa połączenia Realtime (tylko w prywatnym kanale zalogowanego usera)
+    const fetchUser = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) {
+          setCurrentUserId(user.id);
+        } else {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.id) {
+            setCurrentUserId(session.user.id);
+          }
+        }
+      } catch {}
+    };
+
+    fetchUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUserId(session?.user?.id || null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [initDevice, supabase]);
+
+  // 2. Obsługa połączenia Realtime
   useEffect(() => {
-    if (!deviceId || !userId) return;
+    if (!deviceId) return;
 
-    const channel = supabase.channel(`songify_connect_${userId}`, {
+    // Bezpieczna nazwa kanału: jeśli user jest zalogowany, dostaje swój prywatny kanał.
+    // Jeśli sesja się jeszcze doczytuje, łączy się do kanału wspólnego, dopóki user się nie pojawi.
+    const channelName = currentUserId ? `songify_connect_${currentUserId}` : "songify_connect_hub";
+
+    const channel = supabase.channel(channelName, {
       config: {
         presence: { key: deviceId },
         broadcast: { ack: false, self: false },
@@ -84,7 +106,6 @@ export default function ConnectSyncEngine() {
 
         setOnlineDevices(devices);
 
-        // Przejmujemy hosta tylko wtedy, gdy w sieci realnie nikogo innego już nie ma
         const currentActive = useDeviceStore.getState().activeDeviceId;
         if (currentActive && currentActive !== deviceId) {
           const hostStillPresent = devices.some((d) => d.id === currentActive);
@@ -93,16 +114,13 @@ export default function ConnectSyncEngine() {
           }
         }
       })
-      // B. Ktoś wszedł i pyta o aktualnie odtwarzany utwór
+      // B. Ktoś pyta o stan hosta
       .on("broadcast", { event: "REQUEST_HOST_STATE" }, ({ payload }) => {
         if (!payload || payload.senderId === deviceId) return;
 
         const pState = usePlayerStore.getState();
-        const dState = useDeviceStore.getState();
 
-        // Jeśli to urządzenie fizycznie gra dźwięk:
         if (pState.currentTrack && pState.isPlaying) {
-          // Zawsze potwierdzamy w modalu, że to my jesteśmy wybranym hostem
           setActiveDeviceId(deviceId);
 
           channel.send({
@@ -119,7 +137,7 @@ export default function ConnectSyncEngine() {
           });
         }
       })
-      // C. Otrzymanie pełnego snapshotu od aktywnego hosta
+      // C. Otrzymanie snapshotu od aktywnego hosta
       .on("broadcast", { event: "PROVIDE_HOST_STATE" }, ({ payload }) => {
         if (!payload || payload.targetId !== deviceId) return;
 
@@ -136,7 +154,6 @@ export default function ConnectSyncEngine() {
         }
         if (typeof payload.currentTime === "number") {
           setCurrentTime(payload.currentTime);
-          // Tylko pilot aktualizuje czas, nie cofamy grającego Iframe
           const isMeTheHost = payload.activeDeviceId === deviceId;
           if (!isMeTheHost) {
             usePlayerStore.setState({ currentTime: payload.currentTime });
@@ -146,14 +163,13 @@ export default function ConnectSyncEngine() {
           setIsPlaying(payload.isPlaying);
         }
 
-        // Zdalny ekran natychmiast odblokowuje kontrolki playera
         usePlayerStore.getState().setIsLoadingAudio(false);
 
         setTimeout(() => {
           isHandlingRemoteActionRef.current = false;
         }, 500);
       })
-      // D. Zdalne komendy użytkownika
+      // D. Zdalne komendy
       .on("broadcast", { event: "CONNECT_COMMAND" }, ({ payload }) => {
         const currentMyId = useDeviceStore.getState().deviceId;
         if (!payload || payload.senderId === currentMyId || !currentMyId) return;
@@ -169,7 +185,6 @@ export default function ConnectSyncEngine() {
               setCurrentTime(payload.currentTime);
             }
             
-            // Zachowujemy stan isPlaying z komendy (jeśli była pauza, zostaje pauza)
             const shouldStartPlaying = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
             setIsPlaying(shouldStartPlaying);
             usePlayerStore.getState().setIsPlaying(shouldStartPlaying);
@@ -192,7 +207,6 @@ export default function ConnectSyncEngine() {
             if (typeof payload.time === "number") {
               setCurrentTime(payload.time);
               usePlayerStore.setState({ currentTime: payload.time });
-              // Jeśli to my jesteśmy głośnikiem, natychmiast przewijamy odtwarzacz
               if (useDeviceStore.getState().activeDeviceId === useDeviceStore.getState().deviceId) {
                 seekTo(payload.time);
               }
@@ -221,20 +235,19 @@ export default function ConnectSyncEngine() {
           isHandlingRemoteActionRef.current = false;
         }, 300);
       })
-      // E. Odbiór dokładnego postępu czasu z aktywnego hosta
+      // E. Odbiór postępu czasu z aktywnego hosta
       .on("broadcast", { event: "TIME_TICK" }, ({ payload }) => {
         const myId = useDeviceStore.getState().deviceId;
         if (!payload || payload.senderId === myId) return;
 
         if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.5));
+          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.4));
           
           setCurrentTime(adjustedTime);
           usePlayerStore.setState({ currentTime: adjustedTime });
         }
       })
-      
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           await channel.track({
@@ -244,7 +257,6 @@ export default function ConnectSyncEngine() {
             onlineAt: new Date().toISOString(),
           });
 
-          // Pytamy sieć o stan natychmiast oraz powtarzamy po 400 ms na wypadek bufora
           const askHost = () => {
             channel.send({
               type: "broadcast",
@@ -269,7 +281,7 @@ export default function ConnectSyncEngine() {
     };
   }, [
     deviceId,
-    userId,
+    currentUserId,
     deviceName,
     deviceType,
     setOnlineDevices,
@@ -281,16 +293,16 @@ export default function ConnectSyncEngine() {
     nextTrack,
     previousTrack,
     seekTo,
+    supabase,
   ]);
 
-  // 3. Rozgłaszanie zmiany utworu (w tym automatycznego przejścia do kolejnego utworu)
+  // 3. Rozgłaszanie zmiany utworu
   useEffect(() => {
     if (!currentTrack || isHandlingRemoteActionRef.current || isInitialSyncGracePeriodRef.current || !activeRealtimeChannel) return;
     if (onlineDevices.length <= 1) return;
     if (lastTrackIdSentRef.current === currentTrack.id) return;
 
     lastTrackIdSentRef.current = currentTrack.id;
-
     const currentHostId = useDeviceStore.getState().activeDeviceId || deviceId;
 
     activeRealtimeChannel.send({
@@ -307,14 +319,13 @@ export default function ConnectSyncEngine() {
     });
   }, [currentTrack?.id, queue, deviceId, isPlaying, onlineDevices.length]);
 
-  // 4. Rozgłaszanie kliknięcia Play / Pause przez użytkownika
+  // 4. Rozgłaszanie kliknięcia Play / Pause
   useEffect(() => {
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       return;
     }
 
-    // Blokada: w trakcie startu lub odbierania akcji zdalnej NIE wysyłamy nic
     if (
       isHandlingRemoteActionRef.current ||
       isInitialSyncGracePeriodRef.current ||
@@ -337,7 +348,7 @@ export default function ConnectSyncEngine() {
     });
   }, [isPlaying, deviceId, onlineDevices.length]);
 
-  // 5. Host rozsyła precyzyjny TICK czasu do wszystkich podłączonych urządzeń
+  // 5. Host rozsyła precyzyjny TICK czasu
   useEffect(() => {
     const interval = setInterval(() => {
       if (!activeRealtimeChannel) return;
@@ -345,8 +356,8 @@ export default function ConnectSyncEngine() {
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
-      // Jeśli jest tylko 1 urządzenie lub muzyka nie gra, nie zużywamy limitu Realtime
-      if (dState.onlineDevices.length <= 1 || !pState.isPlaying || !pState.currentTrack) return;
+      if (!pState.isPlaying || !pState.currentTrack) return;
+      if (dState.onlineDevices.length <= 1) return;
 
       const amITheSpeaker = dState.activeDeviceId
         ? dState.activeDeviceId === dState.deviceId
@@ -373,8 +384,6 @@ export default function ConnectSyncEngine() {
     if (seekTarget === null || !activeRealtimeChannel) return;
 
     const targetTime = seekTarget;
-
-    // Natychmiast synchronizujemy czas lokalny z nową pozycją
     setCurrentTime(targetTime);
     usePlayerStore.setState({ currentTime: targetTime });
 
