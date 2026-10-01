@@ -290,9 +290,8 @@ export default function FullPlayer() {
             </div>
             <div className="overflow-hidden mt-0.5">
               <p
-                style={isLongArtist ? { animationDuration: "18s" } : undefined}
                 className={`text-sm font-medium text-teal-400/90 ${
-                  isLongArtist ? "animate-marquee inline-block whitespace-nowrap" : "truncate"
+                  isLongArtist ? "animate-marquee-slow inline-block whitespace-nowrap" : "truncate"
                 }`}
               >
                 {currentTrack.artist}
