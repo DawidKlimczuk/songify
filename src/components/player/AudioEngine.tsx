@@ -161,6 +161,13 @@ export default function AudioEngine() {
         }
 
         const launchPlayer = () => {
+          // KLUCZOWE ZABEZPIECZENIE:
+          // Jeśli podczas pobierania streamu zmieniono utwór na inny, anulujemy tworzenie tego odtwarzacza!
+          const currentStoreTrackId = usePlayerStore.getState().currentTrack?.id;
+          if (currentStoreTrackId !== currentTrack.id) {
+            return;
+          }
+
           if (!playerRef.current) {
             playerRef.current = new window.YT.Player("songify-hidden-player", {
               height: "1",
@@ -207,7 +214,10 @@ export default function AudioEngine() {
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
                     try {
+                      // Błyskawiczne uciszenie i zatrzymanie, żeby nawet ułamek sekundy nie przedostał się na głośniki
+                      event.target.mute();
                       event.target.pauseVideo();
+                      event.target.stopVideo();
                     } catch {}
                   }
                 },
