@@ -141,7 +141,7 @@ export default function ConnectSyncEngine() {
               queue: pState.queue,
               isPlaying: pState.isPlaying,
               currentTime: pState.currentTime || 0,
-              volume: useDeviceStore.getState().volume ?? 100,
+              volume: useDeviceStore.getState().volume,
               repeatMode: pState.repeatMode,
               isShuffle: pState.isShuffle,
               sleepTimerEndsAt: pState.sleepTimerEndsAt,
@@ -184,7 +184,8 @@ export default function ConnectSyncEngine() {
           setIsPlaying(payload.isPlaying);
         }
         if (typeof payload.volume === "number" && !isNaN(payload.volume)) {
-          setVolume(payload.volume);
+          // Ustawiamy głośność dla aktywnego hosta
+          useDeviceStore.getState().setVolume(payload.volume, payload.activeDeviceId);
         }
         if (payload.repeatMode) {
           usePlayerStore.setState({ repeatMode: payload.repeatMode });
