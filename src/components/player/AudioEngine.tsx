@@ -145,9 +145,12 @@ export default function AudioEngine() {
 
         setAudioData(data.youtubeUrl);
 
-        // Nowa piosenka ZAWSZE startuje od 0:00!
-        const initialTime = isDifferentTrack ? 0 : Math.max(0, Math.floor(currentTime || 0));
-        if (isDifferentTrack) {
+        // Jeśli przechodzimy handoff (urządzenie nie było głośnikiem i ma już odtworzony czas w store), nie zerujemy go!
+        const latestTime = usePlayerStore.getState().currentTime || 0;
+        const isHandoffTransition = !isAudioHost && latestTime > 0;
+        const initialTime = (isDifferentTrack && !isHandoffTransition) ? 0 : Math.max(0, Math.floor(latestTime));
+
+        if (isDifferentTrack && !isHandoffTransition) {
           setCurrentTime(0);
         }
 

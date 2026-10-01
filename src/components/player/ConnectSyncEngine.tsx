@@ -111,7 +111,14 @@ export default function ConnectSyncEngine() {
         if (currentActive && currentActive !== deviceId) {
           const hostStillPresent = devices.some((d) => d.id === currentActive);
           if (!hostStillPresent && devices.length === 1) {
+            // Zabezpieczenie: zachowujemy aktualny postęp czasu ze store'a przed przejęciem roli hosta
+            const preservedTime = usePlayerStore.getState().currentTime;
             setActiveDeviceId(deviceId);
+            useDeviceStore.setState({ activeDeviceId: deviceId });
+
+            if (typeof preservedTime === "number" && preservedTime > 0) {
+              usePlayerStore.setState({ currentTime: preservedTime });
+            }
           }
         }
       })
@@ -245,14 +252,16 @@ export default function ConnectSyncEngine() {
 
           case "SET_TRACK":
             if (payload.track) {
+              const pStore = usePlayerStore.getState();
+              const isDifferentSong = pStore.currentTrack?.id !== payload.track.id;
+              
               lastTrackIdSentRef.current = payload.track.id;
               if (payload.activeDeviceId) {
                 setActiveDeviceId(payload.activeDeviceId);
               }
               const shouldAutoPlay = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
               
-              const pStore = usePlayerStore.getState();
-              const history = pStore.currentTrack ? [...pStore.history, pStore.currentTrack] : pStore.history;
+              const history = pStore.currentTrack && isDifferentSong ? [...pStore.history, pStore.currentTrack] : pStore.history;
               const incomingQueue = Array.isArray(payload.queue) && payload.queue.length > 0
                 ? payload.queue
                 : [{ ...payload.track, id: String(payload.track.id) }];
@@ -261,7 +270,7 @@ export default function ConnectSyncEngine() {
                 currentTrack: { ...payload.track, id: String(payload.track.id) },
                 queue: incomingQueue,
                 isPlaying: shouldAutoPlay,
-                currentTime: 0,
+                currentTime: isDifferentSong ? 0 : pStore.currentTime,
                 duration: payload.track.duration || 0,
                 history,
                 isLiked: false,
