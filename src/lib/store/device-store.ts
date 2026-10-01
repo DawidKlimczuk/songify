@@ -16,13 +16,14 @@ interface DeviceState {
   deviceType: "computer" | "mobile";
   activeDeviceId: string;
   onlineDevices: DeviceInfo[];
-  volume: number; // 0 - 100
+  volume: number; // aktualnie wyświetlana głośność (aktywnego głośnika)
+  deviceVolumes: Record<string, number>; // mapa { [deviceId]: volume }
   isDevicePickerOpen: boolean;
 
   setDevicePickerOpen: (open: boolean) => void;
   setActiveDeviceId: (id: string) => void;
   setOnlineDevices: (devices: DeviceInfo[]) => void;
-  setVolume: (volume: number) => void;
+  setVolume: (volume: number, targetDeviceId?: string) => void;
   initDevice: () => void;
 }
 
@@ -45,11 +46,9 @@ function detectDeviceInfo(): { name: string; type: "computer" | "mobile" } {
   }
 }
 
-// Funkcja generująca w 100% unikalny ID dla tej konkretnej instancji przeglądarki
 function getOrCreateUniqueDeviceId(): string {
   if (typeof window === "undefined") return "";
   
-  // Najpierw sprawdzamy sessionStorage – nie podlega synchronizacji chmurowej
   let localId = sessionStorage.getItem("songify_instance_device_id");
   if (!localId) {
     const prefix = /mobile|android|iphone/i.test(navigator.userAgent) ? "mob_" : "pc_";
@@ -68,22 +67,42 @@ export const useDeviceStore = create<DeviceState>()(
       activeDeviceId: "",
       onlineDevices: [],
       volume: 100,
+      deviceVolumes: {},
       isDevicePickerOpen: false,
 
       setDevicePickerOpen: (open) => set({ isDevicePickerOpen: open }),
-      setActiveDeviceId: (id) => set({ activeDeviceId: id }),
+      setActiveDeviceId: (id) => {
+        const { deviceVolumes, deviceId, volume } = get();
+        // Pobieramy zapamiętaną głośność przełączanego urządzenia lub obecną
+        const targetVol = deviceVolumes[id] ?? (id === deviceId ? volume : 100);
+        set({ activeDeviceId: id, volume: targetVol });
+      },
       setOnlineDevices: (devices) => set({ onlineDevices: devices }),
-      setVolume: (volume) => set({ volume }),
+      
+      setVolume: (newVolume, targetDeviceId) => {
+        const { activeDeviceId, deviceId, deviceVolumes } = get();
+        const target = targetDeviceId || activeDeviceId || deviceId;
+
+        set({
+          volume: newVolume,
+          deviceVolumes: {
+            ...deviceVolumes,
+            [target]: newVolume,
+          },
+        });
+      },
 
       initDevice: () => {
         const uniqueId = getOrCreateUniqueDeviceId();
         const detected = detectDeviceInfo();
+        const { deviceVolumes } = get();
+        const initialVol = deviceVolumes[uniqueId] ?? 100;
 
         set({
           deviceId: uniqueId,
           deviceName: detected.name,
           deviceType: detected.type,
-          // activeDeviceId NIE jest wymuszane na dzień dobry, decyduje sieć Realtime
+          volume: initialVol,
         });
       },
     }),
@@ -91,7 +110,7 @@ export const useDeviceStore = create<DeviceState>()(
       name: "songify_device_state",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        // NIE zapisujemy deviceId w localStorage, aby profil Google nie synchronizował go na drugie urządzenie!
+        deviceVolumes: state.deviceVolumes,
         volume: state.volume,
       }),
     }

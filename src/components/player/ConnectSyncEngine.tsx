@@ -280,7 +280,13 @@ export default function ConnectSyncEngine() {
             break;
 
           case "SET_VOLUME":
-            setVolume(payload.value);
+            if (typeof payload.value === "number") {
+              const currentActive = useDeviceStore.getState().activeDeviceId || useDeviceStore.getState().deviceId;
+              // Aktualizujemy tylko jeśli to komenda dla mnie LUB jeśli patrzę na to urządzenie jako pilot
+              if (!payload.targetDeviceId || payload.targetDeviceId === currentActive || payload.targetDeviceId === deviceId) {
+                setVolume(payload.value, payload.targetDeviceId);
+              }
+            }
             break;
 
           case "SET_LIKED":
@@ -438,7 +444,7 @@ export default function ConnectSyncEngine() {
     });
   }, [isPlaying, deviceId, onlineDevices.length]);
 
-  // 4b. Rozgłaszanie zmiany głośności
+  // 4b. Rozgłaszanie zmiany głośności (zawsze z ID urządzenia, które regulujemy)
   const lastVolumeRef = useRef<number>(volume);
   useEffect(() => {
     if (isInitialMountRef.current || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
@@ -446,6 +452,7 @@ export default function ConnectSyncEngine() {
     if (lastVolumeRef.current === volume) return;
 
     lastVolumeRef.current = volume;
+    const targetId = activeDeviceId || deviceId;
 
     activeRealtimeChannel.send({
       type: "broadcast",
@@ -453,10 +460,11 @@ export default function ConnectSyncEngine() {
       payload: {
         senderId: deviceId,
         type: "SET_VOLUME",
+        targetDeviceId: targetId,
         value: volume,
       },
     });
-  }, [volume, deviceId, onlineDevices.length]);
+  }, [volume, deviceId, activeDeviceId, onlineDevices.length]);
 
   // 5. Host rozsyła precyzyjny TICK czasu
   useEffect(() => {
