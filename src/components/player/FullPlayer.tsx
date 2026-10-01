@@ -356,12 +356,11 @@ export default function FullPlayer() {
           <button
             onClick={() => {
               toggleShuffle();
-              const nextShuffle = !isShuffle;
-              const currentQ = usePlayerStore.getState().queue;
+              const state = usePlayerStore.getState();
               sendConnectCommand({
                 type: "SET_SHUFFLE",
-                isShuffle: nextShuffle,
-                queue: currentQ,
+                isShuffle: state.isShuffle,
+                queue: state.queue,
               });
             }}
             className="p-2 text-gray-400 hover:text-white transition active:scale-90"

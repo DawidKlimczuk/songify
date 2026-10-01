@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import { sendConnectCommand } from "@/components/player/ConnectSyncEngine";
 
 export interface Track {
   id: string;
@@ -142,12 +143,14 @@ export const usePlayerStore = create<PlayerState>()(
         const [moved] = updated.splice(startIndex, 1);
         updated.splice(endIndex, 0, moved);
         set({ queue: updated });
+        sendConnectCommand({ type: "SYNC_QUEUE", queue: updated });
       },
 
       removeFromQueue: (index) => {
         const { queue } = get();
         const updated = queue.filter((_, idx) => idx !== index);
         set({ queue: updated });
+        sendConnectCommand({ type: "SYNC_QUEUE", queue: updated });
       },
 
       playNextInQueue: (index) => {
@@ -155,32 +158,36 @@ export const usePlayerStore = create<PlayerState>()(
         if (index <= 1 || index >= queue.length) return;
         const updated = [...queue];
         const [moved] = updated.splice(index, 1);
-        // Wstawiamy zaraz na 1. indeks (zaraz za currently playing [0])
         updated.splice(1, 0, moved);
         set({ queue: updated });
+        sendConnectCommand({ type: "SYNC_QUEUE", queue: updated });
       },
 
       addToQueue: (track) => {
         const { queue, originalQueue, currentTrack } = get();
         const trackWithId = { ...track, id: String(track.id) };
 
-        // Jeśli kolejka jest pusta, ale gra bieżący utwór, ustawiamy go na indeksie 0
         let baseQueue = [...queue];
         if (baseQueue.length === 0 && currentTrack) {
           baseQueue = [{ ...currentTrack, id: String(currentTrack.id) }];
         }
 
-        // Wstawiamy nowy utwór zaraz na pozycję 1 (jako następny do odtworzenia)
-        // Dzięki temu od razu widać go na samej górze sekcji "Następne w kolejce"!
         if (baseQueue.length > 0) {
           baseQueue.splice(1, 0, trackWithId);
         } else {
           baseQueue = [trackWithId];
         }
 
+        const newOriginal = [trackWithId, ...originalQueue];
         set({
           queue: baseQueue,
-          originalQueue: [trackWithId, ...originalQueue],
+          originalQueue: newOriginal,
+        });
+
+        sendConnectCommand({
+          type: "SYNC_QUEUE",
+          queue: baseQueue,
+          originalQueue: newOriginal,
         });
       },
 

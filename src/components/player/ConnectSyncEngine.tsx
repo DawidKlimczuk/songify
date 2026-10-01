@@ -268,8 +268,17 @@ export default function ConnectSyncEngine() {
             if (typeof payload.isShuffle === "boolean") {
               usePlayerStore.setState({ isShuffle: payload.isShuffle });
             }
-            if (payload.queue) {
+            if (Array.isArray(payload.queue)) {
               usePlayerStore.setState({ queue: payload.queue });
+            }
+            break;
+
+          case "SYNC_QUEUE":
+            if (Array.isArray(payload.queue)) {
+              usePlayerStore.setState({
+                queue: payload.queue,
+                ...(payload.originalQueue ? { originalQueue: payload.originalQueue } : {}),
+              });
             }
             break;
 
