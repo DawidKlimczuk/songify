@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useDeviceStore, DeviceInfo } from "@/lib/store/device-store";
 import { usePlayerStore } from "@/lib/store/player-store";
@@ -9,6 +9,7 @@ let activeRealtimeChannel: any = null;
 
 export default function ConnectSyncEngine() {
   const supabase = createClient();
+  const [userId, setUserId] = useState<string | null>(null);
   const isHandlingRemoteActionRef = useRef<boolean>(false);
   const isSeekingGuardRef = useRef<boolean>(false);
   const isInitialSyncGracePeriodRef = useRef<boolean>(true);
@@ -49,11 +50,11 @@ export default function ConnectSyncEngine() {
     initDevice();
   }, [initDevice]);
 
-  // 2. Obsługa połączenia Realtime
+  // 2. Obsługa połączenia Realtime (tylko w prywatnym kanale zalogowanego usera)
   useEffect(() => {
-    if (!deviceId) return;
+    if (!deviceId || !userId) return;
 
-    const channel = supabase.channel("songify_connect_hub", {
+    const channel = supabase.channel(`songify_connect_${userId}`, {
       config: {
         presence: { key: deviceId },
         broadcast: { ack: false, self: false },
@@ -227,7 +228,7 @@ export default function ConnectSyncEngine() {
 
         if (typeof payload.currentTime === "number" && !isNaN(payload.currentTime)) {
           const latency = payload.sentAt ? (Date.now() - payload.sentAt) / 1000 : 0;
-          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.3));
+          const adjustedTime = payload.currentTime + Math.max(0, Math.min(latency, 0.5));
           
           setCurrentTime(adjustedTime);
           usePlayerStore.setState({ currentTime: adjustedTime });
@@ -268,6 +269,7 @@ export default function ConnectSyncEngine() {
     };
   }, [
     deviceId,
+    userId,
     deviceName,
     deviceType,
     setOnlineDevices,
@@ -343,12 +345,9 @@ export default function ConnectSyncEngine() {
       const dState = useDeviceStore.getState();
       const pState = usePlayerStore.getState();
 
-      // Jeśli muzyka nie gra, nie spamujemy sieci
-      if (!pState.isPlaying || !pState.currentTrack) return;
+      // Jeśli jest tylko 1 urządzenie lub muzyka nie gra, nie zużywamy limitu Realtime
+      if (dState.onlineDevices.length <= 1 || !pState.isPlaying || !pState.currentTrack) return;
 
-      // Sprawdzamy, czy to urządzenie jest fizycznym głośnikiem:
-      // 1. Jeśli activeDeviceId jest ustawione, głośnikiem jest tylko to urządzenie
-      // 2. Jeśli activeDeviceId nie ma, wysyła urządzenie, które ma aktywny stan odtwarzania
       const amITheSpeaker = dState.activeDeviceId
         ? dState.activeDeviceId === dState.deviceId
         : true;
@@ -364,7 +363,7 @@ export default function ConnectSyncEngine() {
           },
         }).catch?.(() => {});
       }
-    }, 300);
+    }, 1000);
 
     return () => clearInterval(interval);
   }, [deviceId, isPlaying]);
