@@ -232,9 +232,17 @@ export default function AudioEngine() {
                     // BUFFERING
                   }
                 },
-                onError: () => {
+                onError: (event: any) => {
+                  console.warn("YouTube Player Error:", event?.data);
                   setIsLoadingAudio(false);
-                  setIsPlaying(false);
+
+                  // Kody 101, 150 (blokada osadzania/wytwórnia) lub 2, 5 (złe parametry/błąd HTML5)
+                  // Automatycznie przeskakujemy zepsuty utwór zamiast blokować aplikację
+                  if (event?.data === 150 || event?.data === 101 || event?.data === 2 || event?.data === 5) {
+                    nextTrack();
+                  } else {
+                    setIsPlaying(false);
+                  }
                 },
               },
             });
@@ -514,16 +522,14 @@ export default function AudioEngine() {
 
   // 9. Płynna zmiana głośności bez wpływu na strumień
   useEffect(() => {
-    if (!isAudioHost || !playerRef.current) return;
+    if (!isAudioHost || !playerRef.current || typeof volume !== "number") return;
     try {
-      if (typeof playerRef.current.getVolume === "function") {
-        if (playerRef.current.getVolume() !== volume) {
-          playerRef.current.setVolume(volume);
-        }
-      } else if (typeof playerRef.current.setVolume === "function") {
+      if (typeof playerRef.current.setVolume === "function") {
         playerRef.current.setVolume(volume);
       }
-    } catch {}
+    } catch (err) {
+      console.warn("Błąd ustawiania głośności w YouTube Player:", err);
+    }
   }, [volume, isAudioHost]);
 
   return (

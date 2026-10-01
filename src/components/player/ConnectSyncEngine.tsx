@@ -24,6 +24,7 @@ export default function ConnectSyncEngine() {
     initDevice,
     setOnlineDevices,
     setActiveDeviceId,
+    volume,
     setVolume,
   } = useDeviceStore();
 
@@ -133,6 +134,7 @@ export default function ConnectSyncEngine() {
               queue: pState.queue,
               isPlaying: pState.isPlaying,
               currentTime: pState.currentTime || 0,
+              volume: useDeviceStore.getState().volume ?? 100,
             },
           });
         }
@@ -161,6 +163,9 @@ export default function ConnectSyncEngine() {
         }
         if (typeof payload.isPlaying === "boolean") {
           setIsPlaying(payload.isPlaying);
+        }
+        if (typeof payload.volume === "number" && !isNaN(payload.volume)) {
+          setVolume(payload.volume);
         }
 
         usePlayerStore.getState().setIsLoadingAudio(false);
@@ -347,6 +352,26 @@ export default function ConnectSyncEngine() {
       },
     });
   }, [isPlaying, deviceId, onlineDevices.length]);
+
+  // 4b. Rozgłaszanie zmiany głośności
+  const lastVolumeRef = useRef<number>(volume);
+  useEffect(() => {
+    if (isInitialMountRef.current || isHandlingRemoteActionRef.current || !activeRealtimeChannel) return;
+    if (onlineDevices.length <= 1) return;
+    if (lastVolumeRef.current === volume) return;
+
+    lastVolumeRef.current = volume;
+
+    activeRealtimeChannel.send({
+      type: "broadcast",
+      event: "CONNECT_COMMAND",
+      payload: {
+        senderId: deviceId,
+        type: "SET_VOLUME",
+        value: volume,
+      },
+    });
+  }, [volume, deviceId, onlineDevices.length]);
 
   // 5. Host rozsyła precyzyjny TICK czasu
   useEffect(() => {
