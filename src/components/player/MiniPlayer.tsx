@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Play, Pause, Heart, SkipBack, SkipForward, Music } from "lucide-react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import { toggleLikeTrack, isTrackLiked } from "@/app/actions/playlist";
+import { sendConnectCommand } from "@/components/player/ConnectSyncEngine";
 
 export default function MiniPlayer() {
   const {
@@ -40,6 +41,12 @@ export default function MiniPlayer() {
 
     const nextState = !isLiked;
     setIsLiked(nextState);
+
+    sendConnectCommand({
+      type: "SET_LIKED",
+      trackId: currentTrack.id,
+      isLiked: nextState,
+    });
 
     try {
       const res = await toggleLikeTrack({

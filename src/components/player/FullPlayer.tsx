@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import { toggleLikeTrack, isTrackLiked, addSongToPlaylist } from "@/app/actions/playlist";
+import { sendConnectCommand } from "@/components/player/ConnectSyncEngine";
 import {
   ChevronDown,
   Heart,
@@ -174,6 +175,13 @@ export default function FullPlayer() {
     const nextState = !isLiked;
     setIsLiked(nextState);
 
+    // Rozgłaszamy polubienie do drugiego urządzenia w czasie rzeczywistym
+    sendConnectCommand({
+      type: "SET_LIKED",
+      trackId: currentTrack.id,
+      isLiked: nextState,
+    });
+
     try {
       const res = await toggleLikeTrack({
         id: String(currentTrack.id),
@@ -183,9 +191,23 @@ export default function FullPlayer() {
         duration: currentTrack.duration,
       });
       setIsLiked(res.liked);
+      
+      // Jeśli baza zwróciła inny stan (np. błąd zapisu), wysyłamy korektę
+      if (res.liked !== nextState) {
+        sendConnectCommand({
+          type: "SET_LIKED",
+          trackId: currentTrack.id,
+          isLiked: res.liked,
+        });
+      }
     } catch (err) {
       console.error("Błąd zapisu polubienia:", err);
       setIsLiked(!nextState);
+      sendConnectCommand({
+        type: "SET_LIKED",
+        trackId: currentTrack.id,
+        isLiked: !nextState,
+      });
     }
   };
 

@@ -234,6 +234,12 @@ export default function ConnectSyncEngine() {
           case "SET_VOLUME":
             setVolume(payload.value);
             break;
+
+          case "SET_LIKED":
+            if (payload.trackId && usePlayerStore.getState().currentTrack?.id === payload.trackId) {
+              usePlayerStore.getState().setIsLiked(payload.isLiked);
+            }
+            break;
         }
 
         setTimeout(() => {
