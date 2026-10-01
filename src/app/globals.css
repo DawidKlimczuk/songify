@@ -123,6 +123,14 @@ body {
   animation: marqueeScroll 9s ease-in-out infinite alternate;
 }
 
+.animate-marquee-artist {
+  display: inline-block;
+  white-space: nowrap;
+  width: max-content;
+  will-change: transform;
+  animation: marqueeScroll 20s ease-in-out infinite alternate;
+}
+
 /* --- MOTYW LIGHT (Pudrowy róż, biel, bordowe akcenty) --- */
 html.light body {
   background-color: #fff0f5 !important;

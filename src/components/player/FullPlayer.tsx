@@ -237,7 +237,7 @@ export default function FullPlayer() {
   };
 
   const isLongTitle = currentTrack.title.length > 20;
-  const isLongArtist = (currentTrack.artist || "").length > 24;
+  const isLongArtist = (currentTrack.artist || "").length > 18;
   const displayedTime = scrubbingTime !== null ? scrubbingTime : currentTime;
   const progressPercent = duration > 0 ? (displayedTime / duration) * 100 : 0;
 
@@ -291,7 +291,7 @@ export default function FullPlayer() {
             <div className="overflow-hidden mt-0.5">
               <p
                 className={`text-sm font-medium text-teal-400/90 ${
-                  isLongArtist ? "animate-marquee-slow inline-block whitespace-nowrap" : "truncate"
+                  isLongArtist ? "animate-marquee-artist" : "truncate"
                 }`}
               >
                 {currentTrack.artist}
