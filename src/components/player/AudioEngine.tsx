@@ -191,7 +191,11 @@ export default function AudioEngine() {
                     event.target.setVolume(currentVol);
                   } catch {}
 
-                  if (shouldPlay && amIReallyHost) {
+                  const latestTrackId = usePlayerStore.getState().currentTrack?.id;
+                  const isTrackStillValid = latestTrackId === currentTrack.id;
+
+                  // Odtwarzamy tylko wtedy, gdy w międzyczasie user nie przeklikał na inną piosenkę
+                  if (shouldPlay && amIReallyHost && isTrackStillValid) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
                   } else {
@@ -319,16 +323,21 @@ export default function AudioEngine() {
 
     if (!isReadyRef.current || !playerRef.current) return;
 
+    const isLoading = usePlayerStore.getState().isLoadingAudio;
+
     try {
       if (isPlaying && isAudioHost) {
-        // Gwarancja: przed wznowieniem dźwięku upewniamy się, że głośność jest poprawna
-        if (typeof playerRef.current.setVolume === "function") {
-          const curVol = useDeviceStore.getState().volume ?? 100;
-          playerRef.current.setVolume(curVol);
-        }
-        if (typeof playerRef.current.playVideo === "function") {
-          playerRef.current.playVideo();
-          silentAudioRef.current?.play().catch(() => {});
+        // Blokujemy wznowienie starego utworu z bufora, jeśli trwa pobieranie nowego!
+        if (!isLoading) {
+          // Gwarancja: przed wznowieniem dźwięku upewniamy się, że głośność jest poprawna
+          if (typeof playerRef.current.setVolume === "function") {
+            const curVol = useDeviceStore.getState().volume ?? 100;
+            playerRef.current.setVolume(curVol);
+          }
+          if (typeof playerRef.current.playVideo === "function") {
+            playerRef.current.playVideo();
+            silentAudioRef.current?.play().catch(() => {});
+          }
         }
       } else {
         if (typeof playerRef.current.pauseVideo === "function") {
