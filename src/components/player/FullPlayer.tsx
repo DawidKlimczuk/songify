@@ -237,7 +237,7 @@ export default function FullPlayer() {
   };
 
   const isLongTitle = currentTrack.title.length > 20;
-  const isLongArtist = (currentTrack.artist || "").length > 18;
+  const isLongArtist = (currentTrack.artist || "").length > 28;
   const displayedTime = scrubbingTime !== null ? scrubbingTime : currentTime;
   const progressPercent = duration > 0 ? (displayedTime / duration) * 100 : 0;
 
