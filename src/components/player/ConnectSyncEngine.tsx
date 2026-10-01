@@ -135,6 +135,10 @@ export default function ConnectSyncEngine() {
               isPlaying: pState.isPlaying,
               currentTime: pState.currentTime || 0,
               volume: useDeviceStore.getState().volume ?? 100,
+              repeatMode: pState.repeatMode,
+              isShuffle: pState.isShuffle,
+              sleepTimerEndsAt: pState.sleepTimerEndsAt,
+              sleepTimerMode: pState.sleepTimerMode,
             },
           });
         }
@@ -166,6 +170,18 @@ export default function ConnectSyncEngine() {
         }
         if (typeof payload.volume === "number" && !isNaN(payload.volume)) {
           setVolume(payload.volume);
+        }
+        if (payload.repeatMode) {
+          usePlayerStore.setState({ repeatMode: payload.repeatMode });
+        }
+        if (typeof payload.isShuffle === "boolean") {
+          usePlayerStore.setState({ isShuffle: payload.isShuffle });
+        }
+        if (payload.sleepTimerMode !== undefined) {
+          usePlayerStore.setState({
+            sleepTimerEndsAt: payload.sleepTimerEndsAt || null,
+            sleepTimerMode: payload.sleepTimerMode || null,
+          });
         }
 
         usePlayerStore.getState().setIsLoadingAudio(false);
@@ -239,6 +255,28 @@ export default function ConnectSyncEngine() {
             if (payload.trackId && usePlayerStore.getState().currentTrack?.id === payload.trackId) {
               usePlayerStore.getState().setIsLiked(payload.isLiked);
             }
+            break;
+
+          case "SET_REPEAT":
+            if (payload.mode) {
+              usePlayerStore.setState({ repeatMode: payload.mode });
+            }
+            break;
+
+          case "SET_SHUFFLE":
+            if (typeof payload.isShuffle === "boolean") {
+              usePlayerStore.setState({ isShuffle: payload.isShuffle });
+            }
+            if (payload.queue) {
+              usePlayerStore.setState({ queue: payload.queue });
+            }
+            break;
+
+          case "SET_SLEEP_TIMER":
+            usePlayerStore.setState({
+              sleepTimerEndsAt: payload.sleepTimerEndsAt ?? null,
+              sleepTimerMode: payload.sleepTimerMode ?? null,
+            });
             break;
         }
 

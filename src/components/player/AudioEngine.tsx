@@ -431,31 +431,41 @@ export default function AudioEngine() {
       const now = Date.now();
       const timeLeftMs = sleepTimerEndsAt - now;
 
+      // Sprawdzamy czy to urządzenie fizycznie odtwarza dźwięk
+      const currentActive = useDeviceStore.getState().activeDeviceId;
+      const amITheHost = currentActive ? currentActive === deviceId : isAudioHost;
+
       if (timeLeftMs <= 0) {
-        // Koniec czasu -> Pauza, reset głośności i zerowanie timera
         clearInterval(interval);
-        if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
-          playerRef.current.pauseVideo();
-          try {
-            playerRef.current.setVolume(100);
-          } catch {}
+
+        // Tylko urządzenie fizycznie grające pauzuje odtwarzacz i przywraca głośność bazową
+        if (amITheHost) {
+          if (playerRef.current && typeof playerRef.current.pauseVideo === "function") {
+            playerRef.current.pauseVideo();
+            try {
+              const baseVol = useDeviceStore.getState().volume ?? 100;
+              playerRef.current.setVolume(baseVol);
+            } catch {}
+          }
+          silentAudioRef.current?.pause();
+          setIsPlaying(false);
         }
-        silentAudioRef.current?.pause();
-        setIsPlaying(false);
+
         setSleepTimer(null);
         return;
       }
 
-      // Płynny fade-out przez ostatnie 10 sekund
-      if (timeLeftMs <= 10000 && playerRef.current && typeof playerRef.current.setVolume === "function") {
+      // Płynny fade-out przez ostatnie 10 sekund - TYLKO na fizycznym głośniku!
+      if (amITheHost && timeLeftMs <= 10000 && playerRef.current && typeof playerRef.current.setVolume === "function") {
         const factor = Math.max(0, timeLeftMs / 10000);
-        const targetVol = Math.floor(factor * 100);
+        const baseVol = useDeviceStore.getState().volume ?? 100;
+        const targetVol = Math.floor(factor * baseVol);
         playerRef.current.setVolume(targetVol);
       }
-    }, 500);
+    }, 250);
 
     return () => clearInterval(interval);
-  }, [sleepTimerEndsAt, sleepTimerMode, setIsPlaying, setSleepTimer]);
+  }, [sleepTimerEndsAt, sleepTimerMode, isAudioHost, deviceId, setIsPlaying, setSleepTimer]);
 
   // 8. Czysty Handoff bez nakładania się dźwięku i przycinek
   useEffect(() => {
