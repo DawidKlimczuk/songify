@@ -156,7 +156,15 @@ export default function ConnectSyncEngine() {
         if (payload.currentTrack) {
           lastTrackIdSentRef.current = payload.currentTrack.id;
           const shouldPlay = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
-          setCurrentTrack(payload.currentTrack, payload.queue || [], shouldPlay);
+          const incomingQueue = Array.isArray(payload.queue) && payload.queue.length > 0
+            ? payload.queue
+            : [{ ...payload.currentTrack, id: String(payload.currentTrack.id) }];
+
+          usePlayerStore.setState({
+            currentTrack: { ...payload.currentTrack, id: String(payload.currentTrack.id) },
+            queue: incomingQueue,
+            isPlaying: shouldPlay,
+          });
         }
         if (typeof payload.currentTime === "number") {
           setCurrentTime(payload.currentTime);
@@ -242,9 +250,23 @@ export default function ConnectSyncEngine() {
                 setActiveDeviceId(payload.activeDeviceId);
               }
               const shouldAutoPlay = typeof payload.isPlaying === "boolean" ? payload.isPlaying : false;
-              setCurrentTrack(payload.track, payload.queue || [], shouldAutoPlay);
-              setCurrentTime(0);
-              usePlayerStore.getState().setIsLoadingAudio(false);
+              
+              const pStore = usePlayerStore.getState();
+              const history = pStore.currentTrack ? [...pStore.history, pStore.currentTrack] : pStore.history;
+              const incomingQueue = Array.isArray(payload.queue) && payload.queue.length > 0
+                ? payload.queue
+                : [{ ...payload.track, id: String(payload.track.id) }];
+
+              usePlayerStore.setState({
+                currentTrack: { ...payload.track, id: String(payload.track.id) },
+                queue: incomingQueue,
+                isPlaying: shouldAutoPlay,
+                currentTime: 0,
+                duration: payload.track.duration || 0,
+                history,
+                isLiked: false,
+                isLoadingAudio: false,
+              });
             }
             break;
 
