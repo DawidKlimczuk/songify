@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { usePlayerStore } from "@/lib/store/player-store";
-import { toggleLikeTrack, isTrackLiked, addSongToPlaylist } from "@/app/actions/playlist";
+import { toggleLikeTrack, isTrackLiked, addSongToPlaylist, updateSongCover } from "@/app/actions/playlist";
 import { sendConnectCommand } from "@/components/player/ConnectSyncEngine";
 import {
   ChevronDown,
@@ -117,6 +117,7 @@ export default function FullPlayer() {
 
   const [animatingHeart, setAnimatingHeart] = useState(false);
   const [isQuickAdding, setIsQuickAdding] = useState(false);
+  const [isFetchingCover, setIsFetchingCover] = useState(false);
   const [quickAddedSuccess, setQuickAddedSuccess] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
 
@@ -191,8 +192,7 @@ export default function FullPlayer() {
         duration: currentTrack.duration,
       });
       setIsLiked(res.liked);
-      
-      // Jeśli baza zwróciła inny stan (np. błąd zapisu), wysyłamy korektę
+
       if (res.liked !== nextState) {
         sendConnectCommand({
           type: "SET_LIKED",
@@ -210,6 +210,38 @@ export default function FullPlayer() {
       });
     }
   };
+
+  // Dociąganie okładki dla aktualnie odtwarzanego utworu (samodzielny hook na poziomie komponentu)
+  useEffect(() => {
+    const hasCover = Boolean(currentTrack?.albumCover && currentTrack.albumCover.trim() !== "");
+    if (!currentTrack || hasCover) return;
+
+    let isMounted = true;
+    const cleanTitle = (currentTrack.title || "")
+      .replace(/\(.*?\)/g, "")
+      .replace(/\[.*?\]/g, "")
+      .replace(/feat\..*$/gi, "")
+      .replace(/ft\..*$/gi, "")
+      .trim();
+
+    const cleanArtist = (currentTrack.artist || "").split(/[,;&/]/)[0].trim();
+
+    fetch(`/api/deezer/cover?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(cleanArtist)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted) return;
+        if (data?.cover) {
+          const updated = { ...currentTrack, albumCover: data.cover };
+          setCurrentTrack(updated);
+          updateSongCover(currentTrack.id, data.cover).catch(() => {});
+        }
+      })
+      .catch((err) => console.error("Błąd pobierania okładki:", err));
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentTrack?.id]);
 
   if (!isPlayerExpanded || !currentTrack) return null;
 
@@ -290,12 +322,18 @@ export default function FullPlayer() {
       </div>
 
       <div className="my-auto flex flex-col items-center w-full relative z-10">
-        <div className="relative aspect-square w-full max-w-[310px] overflow-hidden rounded-3xl border border-teal-800/40 [html.light_&]:!border-transparent shadow-2xl shadow-teal-950/80">
-          <img
-            src={currentTrack.albumCover}
-            alt={currentTrack.title}
-            className="h-full w-full object-cover"
-          />
+        <div className="relative aspect-square w-full max-w-[310px] overflow-hidden rounded-3xl border border-teal-800/40 [html.light_&]:!border-transparent shadow-2xl shadow-teal-950/80 bg-[#121c20] flex items-center justify-center">
+          {currentTrack.albumCover && currentTrack.albumCover.trim() !== "" ? (
+            <img
+              src={currentTrack.albumCover}
+              alt={currentTrack.title}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center text-teal-400/60">
+              <Music2 className="h-16 w-16" />
+            </div>
+          )}
           {isLoadingAudio && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm">
               <Loader2 className="h-10 w-10 animate-spin text-teal-400" />

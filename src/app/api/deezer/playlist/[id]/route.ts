@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
 
+// Bezpieczny import runtime CommonJS dla Next.js / TypeScript
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const spotifyUrlInfo = require("spotify-url-info");
+const { getTracks, getDetails } = spotifyUrlInfo(fetch);
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export const SPOTIFY_PLAYLIST_REGISTRY: Record<
   string,
   { spotifyId: string; title: string; desc: string; category: string }
@@ -188,143 +196,170 @@ export async function GET(
   const url = new URL(request.url);
   const coversOnly = url.searchParams.get("coversOnly") === "true";
 
+  console.log("===> [SONGIFY] Rozpoczęto pobieranie playlisty:", rawId);
+
   if (!rawId) {
     return NextResponse.json({ error: "Brak ID" }, { status: 400 });
   }
 
-  // 1. Sprawdzamy cache w RAM (odpowiedź w 2 milisekundy!)
+  memoryCache.delete(rawId);
   const now = Date.now();
-  const cached = memoryCache.get(rawId);
-  if (cached && cached.expiresAt > now) {
-    if (coversOnly) {
-      return NextResponse.json({ id: rawId, cover: cached.data.cover, title: cached.data.title });
-    }
-    return NextResponse.json(cached.data);
-  }
 
   const config = SPOTIFY_PLAYLIST_REGISTRY[rawId];
   const spotifyPlaylistId = config ? config.spotifyId : rawId;
   const displayTitle = config ? config.title : "Songify Playlist";
 
   try {
-    const spotifyRes = await fetch(
-      `https://open.spotify.com/embed/playlist/${spotifyPlaylistId}`,
-      {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        },
-        next: { revalidate: 86400 },
-      }
-    );
-
-    if (!spotifyRes.ok) {
-      throw new Error(`Spotify embed status: ${spotifyRes.status}`);
-    }
-
-    const html = await spotifyRes.text();
-    const match = html.match(
-      /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
-    );
-
-    let rawTracks: any[] = [];
+    let allTracks: any[] = [];
     let coverUrl = "";
     let playlistTitle = displayTitle;
 
-    if (match && match[1]) {
-      try {
-        const jsonData = JSON.parse(match[1]);
-        const entity = extractSpotifyEntity(jsonData);
+    // KROK 1: Pobieranie pełnej playlisty za pomocą dedykowanego scrapera spotify-url-info
+    try {
+      const fullUrl = `https://open.spotify.com/playlist/${spotifyPlaylistId}`;
+      console.log("===> [SONGIFY] Pobieranie metadanych przez spotify-url-info...");
+      
+      const [details, rawTracksList] = await Promise.all([
+        getDetails(fullUrl).catch(() => null),
+        getTracks(fullUrl).catch(() => []),
+      ]);
 
-        if (entity) {
-          playlistTitle = displayTitle || entity.title || entity.name || "Songify Playlist";
-          coverUrl =
-            entity.coverArt?.sources?.[0]?.url ||
-            entity.visualIdentity?.image?.[0]?.url ||
-            entity.images?.[0]?.url ||
-            "";
+      if (details?.preview) {
+        playlistTitle = details.preview.title || displayTitle;
+        coverUrl = details.preview.image || "";
+      }
 
-          if (Array.isArray(entity.trackList)) {
-            rawTracks = entity.trackList;
-          } else if (Array.isArray(entity.tracks?.items)) {
-            rawTracks = entity.tracks.items.map((item: any) => item.track || item);
-          }
+      if (Array.isArray(rawTracksList) && rawTracksList.length > 0) {
+        console.log(`===> [SONGIFY] spotify-url-info pomyślnie wyciągnęło: ${rawTracksList.length} utworów!`);
+
+        allTracks = rawTracksList.map((t: any, idx: number) => {
+          const artistName = t.artist || (Array.isArray(t.artists) ? t.artists.map((a: any) => a.name).join(", ") : "Nieznany wykonawca");
+          const trackTitle = t.name || t.title || "Nieznany utwór";
+          const trackCover = t.coverArt?.sources?.[0]?.url || t.image || coverUrl || "";
+          const durationSec = t.duration ? Math.round(t.duration / 1000) : 0;
+
+          return {
+            id: t.id || `sp_${idx}_${rawId}`,
+            title: trackTitle,
+            artist: artistName,
+            albumCover: trackCover,
+            duration: durationSec,
+            source: playlistTitle,
+          };
+        });
+      }
+    } catch (infoErr) {
+      console.warn("===> [SONGIFY] Błąd spotify-url-info:", infoErr);
+    }
+
+    // KROK 2: Jeśli guest token nie przeszedł lub zwrócił 0 utworów -> Fallback do Embed (100 utworów)
+    if (allTracks.length === 0) {
+      console.log("===> [SONGIFY] Użycie fallbacku Embed...");
+      const spotifyRes = await fetch(
+        `https://open.spotify.com/embed/playlist/${spotifyPlaylistId}`,
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          },
+          cache: "no-store",
         }
-      } catch (err) {
-        console.warn("Błąd parsowania embed JSON:", err);
+      );
+
+      if (!spotifyRes.ok) {
+        throw new Error(`Spotify embed status: ${spotifyRes.status}`);
+      }
+
+      const html = await spotifyRes.text();
+      const match = html.match(
+        /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
+      );
+
+      let rawTracks: any[] = [];
+
+      if (match && match[1]) {
+        try {
+          const jsonData = JSON.parse(match[1]);
+          const entity = extractSpotifyEntity(jsonData);
+
+          if (entity) {
+            playlistTitle = displayTitle || entity.title || entity.name || "Songify Playlist";
+            coverUrl =
+              entity.coverArt?.sources?.[0]?.url ||
+              entity.visualIdentity?.image?.[0]?.url ||
+              entity.images?.[0]?.url ||
+              "";
+
+            if (Array.isArray(entity.trackList)) {
+              rawTracks = entity.trackList;
+            } else if (Array.isArray(entity.tracks?.items)) {
+              rawTracks = entity.tracks.items.map((item: any) => item.track || item);
+            }
+          }
+        } catch (err) {
+          console.warn("Błąd parsowania embed JSON:", err);
+        }
+      }
+
+      const CHUNK_SIZE = 15;
+      for (let i = 0; i < rawTracks.length; i += CHUNK_SIZE) {
+        const chunk = rawTracks.slice(i, i + CHUNK_SIZE);
+        const chunkResults = await Promise.all(
+          chunk.map(async (t: any, idx: number) => {
+            const globalIdx = i + idx;
+            let artistName = "Nieznany wykonawca";
+            if (t.subtitle) {
+              artistName = t.subtitle;
+            } else if (Array.isArray(t.artists)) {
+              artistName = t.artists.map((a: any) => a.name).join(", ");
+            }
+
+            const songTitle = t.title || t.name || "Nieznany utwór";
+
+            let trackCover =
+              t.album?.coverArt?.sources?.[0]?.url ||
+              t.coverArt?.sources?.[0]?.url ||
+              t.album?.images?.[0]?.url ||
+              t.images?.[0]?.url ||
+              t.visualIdentity?.image?.[0]?.url ||
+              t.albumCover ||
+              null;
+
+            if (!trackCover) {
+              trackCover = await fetchTrackCoverFallback(songTitle, artistName);
+            }
+
+            return {
+              id: t.id || `sp_${globalIdx}_${rawId}`,
+              title: songTitle,
+              artist: artistName,
+              albumCover: trackCover || "",
+              duration: t.duration ? Math.round(t.duration / 1000) : 0,
+              source: playlistTitle,
+            };
+          })
+        );
+        allTracks.push(...chunkResults);
       }
     }
 
-    // Fallback gdyby embed nie dał okładki
-    if (!coverUrl) {
-      const oEmbedRes = await fetch(
-        `https://open.spotify.com/oembed?url=https://open.spotify.com/playlist/${spotifyPlaylistId}`
-      ).catch(() => null);
-      if (oEmbedRes && oEmbedRes.ok) {
-        const oEmbedData = await oEmbedRes.json();
-        coverUrl = oEmbedData.thumbnail_url || "";
-      }
+    if (!coverUrl && allTracks[0]?.albumCover) {
+      coverUrl = allTracks[0].albumCover;
     }
 
-    // Gdy użytkownik jest na stronie głównej i potrzebujemy tylko okładki
     if (coversOnly) {
       return NextResponse.json({ id: rawId, cover: coverUrl, title: playlistTitle });
     }
 
-    // Pobieramy kompletną listę utworów w bezpiecznych paczkach po 10 na serwerze
-    const tracks: any[] = [];
-    const CHUNK_SIZE = 10;
-
-    for (let i = 0; i < rawTracks.length; i += CHUNK_SIZE) {
-      const chunk = rawTracks.slice(i, i + CHUNK_SIZE);
-      const chunkResults = await Promise.all(
-        chunk.map(async (t: any, idx: number) => {
-          const globalIdx = i + idx;
-          let artistName = "Nieznany wykonawca";
-          if (t.subtitle) {
-            artistName = t.subtitle;
-          } else if (Array.isArray(t.artists)) {
-            artistName = t.artists.map((a: any) => a.name).join(", ");
-          }
-
-          const songTitle = t.title || t.name || "Nieznany utwór";
-
-          let trackCover =
-            t.album?.coverArt?.sources?.[0]?.url ||
-            t.coverArt?.sources?.[0]?.url ||
-            t.album?.images?.[0]?.url ||
-            t.images?.[0]?.url ||
-            t.visualIdentity?.image?.[0]?.url ||
-            t.albumCover ||
-            (typeof t.album?.cover === "string" ? t.album.cover : null) ||
-            null;
-
-          if (!trackCover) {
-            trackCover = await fetchTrackCoverFallback(songTitle, artistName);
-          }
-
-          return {
-            id: t.uri || t.id || `sp_${globalIdx}_${rawId}`,
-            title: songTitle,
-            artist: artistName,
-            albumCover: trackCover || "",
-            duration: t.duration ? Math.round(t.duration / 1000) : 0,
-            source: playlistTitle,
-          };
-        })
-      );
-
-      tracks.push(...chunkResults);
-    }
+    console.log(`===> [SONGIFY] Finalna liczba utworów gotowa do importu: ${allTracks.length}`);
 
     const fullResponse = {
       id: rawId,
       title: playlistTitle,
-      cover: coverUrl || tracks[0]?.albumCover || "",
-      tracks,
+      cover: coverUrl,
+      tracks: allTracks,
     };
 
-    // Zapisujemy w pamięci RAM serwera na 24h
     memoryCache.set(rawId, {
       data: fullResponse,
       expiresAt: now + CACHE_TTL_MS,

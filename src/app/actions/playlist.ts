@@ -349,3 +349,173 @@ export async function removeSongFromPlaylist(
   revalidatePath(`/library/playlist/${playlistId}`);
   return { success: true };
 }
+
+export async function bulkLikeTracks(
+  tracks: Array<{
+    id: string | number;
+    title: string;
+    artist: string;
+    albumCover: string;
+    duration?: number;
+  }>
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Brak autoryzacji");
+
+  const likedPlaylist = await getOrCreateLikedPlaylist();
+
+  // 1. Oczyszczenie ID ze Spotify URI i zamiana średników na przecinki
+  const sanitizedTracks = tracks.map((t) => ({
+    ...t,
+    id: String(t.id).replace("spotify:track:", "").trim(),
+    artist: t.artist.replace(/;/g, ", "),
+  }));
+
+  // 2. Pobranie istniejących powiązań i odrzucenie duplikatów
+  const existingSongs = await prisma.playlistSong.findMany({
+    where: { playlistId: likedPlaylist.id },
+    select: { songId: true },
+  });
+
+  const existingIdsSet = new Set(existingSongs.map((s) => s.songId));
+  const tracksToInsert = sanitizedTracks.filter((track) => !existingIdsSet.has(track.id));
+
+  if (tracksToInsert.length === 0) {
+    return { success: true, count: 0, message: "Wszystkie utwory były już w Twoich Polubionych!" };
+  }
+
+  const baseTimestamp = Date.now();
+
+  // 3. Zapis paczkami po 100 utworów w transakcji bazy (błyskawiczny zapis bez timeoutu)
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < tracksToInsert.length; i += BATCH_SIZE) {
+    const chunk = tracksToInsert.slice(i, i + BATCH_SIZE);
+
+    await prisma.$transaction(
+      chunk.flatMap((track, idx) => {
+        const globalIdx = i + idx;
+        const simulatedAddedAt = new Date(baseTimestamp + (tracksToInsert.length - globalIdx) * 1000);
+
+        return [
+          prisma.song.upsert({
+            where: { id: track.id },
+            update: {},
+            create: {
+              id: track.id,
+              title: track.title,
+              artist: track.artist,
+              albumCover: track.albumCover || "",
+              duration: track.duration ? Math.round(track.duration) : null,
+            },
+          }),
+          prisma.playlistSong.create({
+            data: {
+              playlistId: likedPlaylist.id,
+              songId: track.id,
+              addedAt: simulatedAddedAt,
+            },
+          }),
+        ];
+      })
+    );
+  }
+
+  revalidatePath("/library");
+  revalidatePath(`/library/playlist/${likedPlaylist.id}`);
+  return { success: true, count: tracksToInsert.length };
+}
+
+export async function clearLikedTracks() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Brak autoryzacji");
+
+  const likedPlaylist = await getOrCreateLikedPlaylist();
+
+  await prisma.playlistSong.deleteMany({
+    where: {
+      playlistId: likedPlaylist.id,
+    },
+  });
+
+  revalidatePath("/library");
+  revalidatePath(`/library/playlist/${likedPlaylist.id}`);
+  return { success: true };
+}
+
+// Akcja dociągająca okładki partiami bezpośrednio z oEmbed Spotify / iTunes
+export async function enrichTracksWithCovers(
+  tracks: Array<{ id: string; title: string; artist: string }>
+) {
+  const results = await Promise.all(
+    tracks.map(async (item) => {
+      // 1. Oficjalny oEmbed Spotify (bez limitów rate-limit dla pojedynczych ID)
+      const cleanId = item.id.replace("spotify:track:", "").trim();
+      if (cleanId && !cleanId.startsWith("imported_")) {
+        try {
+          const spRes = await fetch(
+            `https://open.spotify.com/oembed?url=https://open.spotify.com/track/${cleanId}`,
+            {
+              headers: {
+                "User-Agent":
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              },
+            }
+          );
+          if (spRes.ok) {
+            const spData = await spRes.json();
+            if (spData.thumbnail_url) {
+              return { id: item.id, albumCover: spData.thumbnail_url };
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Fallback iTunes
+      try {
+        const query = `${item.title} ${item.artist.split(/[,;&/]/)[0]}`.trim();
+        const itunesRes = await fetch(
+          `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&limit=1`,
+          {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+          }
+        );
+        if (itunesRes.ok) {
+          const data = await itunesRes.json();
+          const first = data.results?.[0];
+          if (first?.artworkUrl100) {
+            return {
+              id: item.id,
+              albumCover: first.artworkUrl100.replace("100x100bb", "600x600bb"),
+            };
+          }
+        }
+      } catch {}
+
+      return { id: item.id, albumCover: "" };
+    })
+  );
+
+  return results;
+}
+
+export async function updateSongCover(songId: string | number, albumCover: string) {
+  if (!albumCover || !songId) return { success: false };
+
+  try {
+    await prisma.song.update({
+      where: { id: String(songId) },
+      data: { albumCover },
+    });
+    revalidatePath("/library");
+    return { success: true };
+  } catch (error) {
+    console.error("Błąd aktualizacji okładki w bazie:", error);
+    return { success: false };
+  }
+}
