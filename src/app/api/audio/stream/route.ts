@@ -14,7 +14,6 @@ async function getInnertube() {
   return yt;
 }
 
-// Funkcja czyszcząca query, aby zapytania o ten sam utwór miały identyczny klucz
 function normalizeQuery(rawQuery: string): string {
   return rawQuery
     .toLowerCase()
@@ -23,7 +22,6 @@ function normalizeQuery(rawQuery: string): string {
     .trim();
 }
 
-// Frazy, które eliminują nagrania koncertowe i bootlegi
 const FORBIDDEN_WORDS = [
   "live",
   "koncert",
@@ -65,48 +63,49 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 2. Jeśli nie ma w bazie -> pytamy YouTube
+    // 2. Szukamy na YouTube
     const youtube = await getInnertube();
     let videoId: string | undefined;
 
-    // Próba 1: YouTube Music (oficjalne audio)
-    try {
-      const musicSearch = await youtube.music.search(query, { type: "song" });
-      const songs = musicSearch.songs?.contents;
-      if (songs && songs.length > 0) {
-        // Szukamy pierwszego utworu, który nie ma w tytule "live" itp.
-        const cleanSong = songs.find((s: any) => {
-          const title = (s.title || "").toLowerCase();
-          return !FORBIDDEN_WORDS.some((word) => title.includes(word));
-        });
-        videoId = cleanSong?.id || songs[0]?.id;
-      }
-    } catch (e) {
-      console.warn("Błąd wyszukiwania YouTube Music, przejście do fallbacku:", e);
-    }
+    // Pobieramy tokeny artystów z zapytania (np. "daria", "zawiałow"), aby upewnić się, że nie bierzemy solowej wersji
+    const queryTokens = normalizedKey.split(" ").filter((w) => w.length > 3);
 
-    // Próba 2: Główna wyszukiwarka YouTube (inteligentny wybór)
-    if (!videoId) {
+    // KROK A: Przeszukujemy klasyczne wideo YouTube (bo teledysk sanah i Darii to "video", a nie "song")
+    try {
       const videoSearch = await youtube.search(query, { type: "video" });
       const videos = (videoSearch.videos as any[]) || [];
 
-      if (videos.length > 0) {
-        // Filtrujemy filmy bez słów zakazanych
-        const cleanVideos = videos.filter((v) => {
-          const title = (v.title?.text || v.title || "").toLowerCase();
-          return !FORBIDDEN_WORDS.some((word) => title.includes(word));
-        });
+      // Filtrujemy nagrania live
+      const cleanVideos = videos.filter((v) => {
+        const title = (v.title?.text || v.title || "").toLowerCase();
+        return !FORBIDDEN_WORDS.some((word) => title.includes(word));
+      });
 
-        const pool = cleanVideos.length > 0 ? cleanVideos : videos;
+      // Szukamy takiego, który zawiera wszystkich głównych artystów w tytule lub autorze
+      const perfectMatch = cleanVideos.find((v) => {
+        const fullText = `${v.title?.text || v.title || ""} ${v.author?.name || ""}`.toLowerCase();
+        return queryTokens.every((token) => fullText.includes(token));
+      });
 
-        // Priorytet 1: Kanał oficjalny (Topic lub pasujący do zapytania artysty)
-        const lowerQuery = query.toLowerCase();
-        const officialMatch = pool.find((v) => {
-          const author = (v.author?.name || "").toLowerCase();
-          return author.includes("topic") || lowerQuery.includes(author);
-        });
+      if (perfectMatch) {
+        videoId = perfectMatch.id;
+      } else if (cleanVideos.length > 0) {
+        videoId = cleanVideos[0].id;
+      }
+    } catch (e) {
+      console.warn("Błąd wyszukiwania YouTube video:", e);
+    }
 
-        videoId = officialMatch?.id || pool[0]?.id;
+    // KROK B: Fallback do YouTube Music, jeśli zwykłe wideo nic nie dało
+    if (!videoId) {
+      try {
+        const musicSearch = await youtube.music.search(query, { type: "song" });
+        const songs = musicSearch.songs?.contents;
+        if (songs && songs.length > 0) {
+          videoId = songs[0]?.id;
+        }
+      } catch (e) {
+        console.warn("Błąd YouTube Music:", e);
       }
     }
 
@@ -114,7 +113,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Nie znaleziono utworu" }, { status: 404 });
     }
 
-    // 3. Zapisujemy poprawny wynik do cache w Supabase
+    // 3. Zapisujemy wynik do cache w Supabase
     try {
       await supabase
         .from("youtube_cache")
