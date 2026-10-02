@@ -105,30 +105,27 @@ body {
   animation: heartShake 0.45s ease-in-out;
 }
 
-@keyframes marqueeScroll {
-  0%, 4% {
+@keyframes spotifyLoop {
+  0%, 20% {
     transform: translateX(0);
   }
-  96%, 100% {
-    /* Przesuwa tekst o jego pełną długość w lewo, zostawiając bufor na widoku */
-    transform: translateX(calc(-100% + 180px));
+  85%, 100% {
+    transform: translateX(-50%);
   }
 }
 
-.animate-marquee {
-  display: inline-block;
-  white-space: nowrap;
+.animate-spotify-loop {
+  display: flex;
   width: max-content;
   will-change: transform;
-  animation: marqueeScroll 9s ease-in-out infinite alternate;
+  animation: spotifyLoop 12s cubic-bezier(0.37, 0, 0.63, 1) infinite;
 }
 
-.animate-marquee-artist {
-  display: inline-block;
-  white-space: nowrap;
+.animate-spotify-loop-artist {
+  display: flex;
   width: max-content;
   will-change: transform;
-  animation: marqueeScroll 20s ease-in-out infinite alternate;
+  animation: spotifyLoop 18s cubic-bezier(0.37, 0, 0.63, 1) infinite;
 }
 
 /* --- MOTYW LIGHT (Pudrowy róż, biel, bordowe akcenty) --- */

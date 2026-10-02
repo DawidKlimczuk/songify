@@ -17,10 +17,12 @@ export default function AudioEngine() {
   const isReadyRef = useRef(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const activeTrackIdRef = useRef<string | null>(null);
+  const loadedVideoIdRef = useRef<string | null>(null);
   const loadingTrackIdRef = useRef<string | null>(null);
   const isInitialMountRef = useRef<boolean>(true);
   const silentAudioRef = useRef<HTMLAudioElement | null>(null);
   const userInitiatedPlayRef = useRef<boolean>(false);
+  const readyForTrackIdRef = useRef<string | null>(null);
 
   const {
     currentTrack,
@@ -131,6 +133,10 @@ export default function AudioEngine() {
         if (typeof playerRef.current.stopVideo === "function") {
           playerRef.current.stopVideo();
         }
+        if (typeof playerRef.current.cueVideoById === "function") {
+          // Natychmiast odpinamy stary film z aktywnego bufora odtwarzacza
+          playerRef.current.cueVideoById("");
+        }
       } catch (err) {}
     }
     silentAudioRef.current?.pause();
@@ -177,41 +183,38 @@ export default function AudioEngine() {
               events: {
                 onReady: (event: any) => {
                   isReadyRef.current = true;
-                  setIsLoadingAudio(false);
+                  loadedVideoIdRef.current = data.videoId;
 
-                  try {
-                    event.target.setVolume(volume);
-                  } catch {}
-
-                  if (initialTime > 0) {
-                    event.target.seekTo(initialTime, true);
-                  }
-
-                  const shouldPlay = usePlayerStore.getState().isPlaying;
-                  const currentActive = useDeviceStore.getState().activeDeviceId;
-                  const amIReallyHost = currentActive ? currentActive === deviceId : isAudioHost;
-
-                  // ZAWSZE ustawiamy realną głośność ze store'a, żeby odtwarzacz nie był wyciszony do zera!
                   try {
                     const currentVol = useDeviceStore.getState().volume ?? 100;
                     event.target.setVolume(currentVol);
-                  } catch {}
-
-                  const latestState = usePlayerStore.getState();
-                  const isTrackStillValid = latestState.currentTrack?.id === currentTrack.id;
-                  const isLoadingNow = latestState.isLoadingAudio;
-
-                  try {
                     event.target.unMute();
                   } catch {}
 
-                  if (shouldPlay && amIReallyHost && isTrackStillValid) {
+                  if (initialTime > 0) {
+                    try {
+                      event.target.seekTo(initialTime, true);
+                    } catch {}
+                  }
+
+                  const latestState = usePlayerStore.getState();
+                  const currentActive = useDeviceStore.getState().activeDeviceId;
+                  const amIReallyHost = currentActive ? currentActive === deviceId : isAudioHost;
+                  
+                  // Klucz: Sprawdzamy czy to wideo w ogóle należy do aktualnego utworu w store
+                  const isExactSameTrack = latestState.currentTrack?.id === currentTrack.id;
+
+                  if (latestState.isPlaying && amIReallyHost && isExactSameTrack) {
                     event.target.playVideo();
                     silentAudioRef.current?.play().catch(() => {});
+                    setIsLoadingAudio(false);
                   } else {
                     try {
                       event.target.pauseVideo();
                     } catch {}
+                    if (isExactSameTrack) {
+                      setIsLoadingAudio(false);
+                    }
                   }
                 },
                 onStateChange: (event: any) => {
@@ -276,6 +279,7 @@ export default function AudioEngine() {
                 playerRef.current.setVolume(curVol);
               } catch {}
 
+              loadedVideoIdRef.current = data.videoId;
               playerRef.current.loadVideoById({
                 videoId: data.videoId,
                 startSeconds: initialTime,
@@ -347,12 +351,12 @@ export default function AudioEngine() {
     if (!isReadyRef.current || !playerRef.current) return;
 
     const isLoading = usePlayerStore.getState().isLoadingAudio;
+    const isTrackMismatch = activeTrackIdRef.current !== currentTrack?.id;
 
     try {
       if (isPlaying && isAudioHost) {
-        // Blokujemy wznowienie starego utworu z bufora, jeśli trwa pobieranie nowego!
-        if (!isLoading) {
-          // Gwarancja: przed wznowieniem dźwięku upewniamy się, że głośność jest poprawna
+        // BLOKADA: Nie odpalamy playVideo, jeśli trwa pobieranie LUB jeśli w odtwarzaczu siedzi stary utwór!
+        if (!isLoading && !isTrackMismatch) {
           if (typeof playerRef.current.setVolume === "function") {
             const curVol = useDeviceStore.getState().volume ?? 100;
             playerRef.current.setVolume(curVol);

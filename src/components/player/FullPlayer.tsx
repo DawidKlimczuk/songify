@@ -237,7 +237,12 @@ export default function FullPlayer() {
   };
 
   const isLongTitle = currentTrack.title.length > 20;
-  const isLongArtist = (currentTrack.artist || "").length > 28;
+  const isLongArtist = (currentTrack.artist || "").length > 26;
+
+  // Im dłuższy tekst, tym więcej sekund na obrót (stała, spokojna prędkość czytania):
+  // ~0.35s na każdy znak + 6s bazy na pauzę na starcie
+  const artistLoopDuration = Math.max(16, Math.round((currentTrack.artist || "").length * 0.38 + 6));
+  const titleLoopDuration = Math.max(12, Math.round(currentTrack.title.length * 0.4 + 5));
   const displayedTime = scrubbingTime !== null ? scrubbingTime : currentTime;
   const progressPercent = duration > 0 ? (displayedTime / duration) * 100 : 0;
 
@@ -279,23 +284,46 @@ export default function FullPlayer() {
 
         <div className="mt-7 flex w-full max-w-[310px] items-center justify-between gap-4">
           <div className="min-w-0 flex-1 overflow-hidden [mask-image:linear-gradient(to_right,black_85%,transparent_100%)]">
+            {/* TYTUŁ */}
             <div className="overflow-hidden">
-              <h2
-                className={`text-xl font-bold tracking-tight text-white ${
-                  isLongTitle ? "animate-marquee inline-block whitespace-nowrap" : "truncate"
-                }`}
-              >
-                {currentTrack.title}
-              </h2>
+              {isLongTitle ? (
+                <div 
+                  className="animate-spotify-loop"
+                  style={{ animationDuration: `${titleLoopDuration}s` }}
+                >
+                  <span className="text-xl font-bold tracking-tight text-white pr-12 whitespace-nowrap">
+                    {currentTrack.title}
+                  </span>
+                  <span className="text-xl font-bold tracking-tight text-white pr-12 whitespace-nowrap">
+                    {currentTrack.title}
+                  </span>
+                </div>
+              ) : (
+                <h2 className="text-xl font-bold tracking-tight text-white truncate">
+                  {currentTrack.title}
+                </h2>
+              )}
             </div>
+
+            {/* AUTORZY */}
             <div className="overflow-hidden mt-0.5">
-              <p
-                className={`text-sm font-medium text-teal-400/90 ${
-                  isLongArtist ? "animate-marquee-artist" : "truncate"
-                }`}
-              >
-                {currentTrack.artist}
-              </p>
+              {isLongArtist ? (
+                <div 
+                  className="animate-spotify-loop-artist"
+                  style={{ animationDuration: `${artistLoopDuration}s` }}
+                >
+                  <span className="text-sm font-medium text-teal-400/90 pr-12 whitespace-nowrap">
+                    {currentTrack.artist}
+                  </span>
+                  <span className="text-sm font-medium text-teal-400/90 pr-12 whitespace-nowrap">
+                    {currentTrack.artist}
+                  </span>
+                </div>
+              ) : (
+                <p className="truncate text-sm font-medium text-teal-400/90">
+                  {currentTrack.artist}
+                </p>
+              )}
             </div>
           </div>
 
