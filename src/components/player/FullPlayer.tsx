@@ -247,8 +247,29 @@ export default function FullPlayer() {
   const progressPercent = duration > 0 ? (displayedTime / duration) * 100 : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-between bg-gradient-to-b from-[#0f1f24] via-[#090e11] to-[#090e11] px-6 py-6 text-white animate-in slide-in-from-bottom duration-300">
-      <div className="flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex flex-col justify-between bg-[#090e11] px-6 py-6 text-white animate-in slide-in-from-bottom duration-300 overflow-hidden">
+      {/* Dynamiczny Ambient Glow: idzie od samej góry i wygasa pod tytułem */}
+      {currentTrack.albumCover && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-[65vh] overflow-hidden z-0"
+          style={{
+            WebkitMaskImage: "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 45%, rgba(0,0,0,0.2) 75%, transparent 100%)",
+            maskImage: "linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 45%, rgba(0,0,0,0.2) 75%, transparent 100%)",
+          }}
+        >
+          <div
+            className="absolute -top-24 left-1/2 -translate-x-1/2 h-[120%] w-[140%] max-w-2xl opacity-60 blur-3xl transition-all duration-700"
+            style={{
+              backgroundImage: `url(${currentTrack.albumCover})`,
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+            }}
+          />
+        </div>
+      )}
+
+      <div className="relative z-10 flex items-center justify-between">
         <button
           onClick={() => setPlayerExpanded(false)}
           className="p-2 text-gray-400 hover:text-white transition"
@@ -268,8 +289,8 @@ export default function FullPlayer() {
         <div className="w-10" />
       </div>
 
-      <div className="my-auto flex flex-col items-center w-full">
-        <div className="relative aspect-square w-full max-w-[310px] overflow-hidden rounded-3xl border border-teal-800/40 shadow-2xl shadow-teal-950/80">
+      <div className="my-auto flex flex-col items-center w-full relative z-10">
+        <div className="relative aspect-square w-full max-w-[310px] overflow-hidden rounded-3xl border border-teal-800/40 [html.light_&]:!border-transparent shadow-2xl shadow-teal-950/80">
           <img
             src={currentTrack.albumCover}
             alt={currentTrack.title}

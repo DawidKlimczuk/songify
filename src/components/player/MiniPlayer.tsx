@@ -80,22 +80,35 @@ export default function MiniPlayer() {
   return (
     <div
       onClick={() => setPlayerExpanded(true)}
-      className="fixed bottom-20 left-3 right-3 z-40 mx-auto max-w-lg cursor-pointer rounded-2xl border border-teal-900/50 bg-[#0e1619]/95 p-2 backdrop-blur-md shadow-2xl transition hover:border-teal-700/60"
+      className="fixed bottom-20 left-3 right-3 z-40 mx-auto max-w-lg cursor-pointer rounded-2xl border border-teal-900/50 bg-[#0e1619]/95 p-2 backdrop-blur-md shadow-2xl transition hover:border-teal-700/60 overflow-hidden"
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="relative z-10 flex items-center justify-between gap-2">
         {/* Okładka + Tytuł i Wykonawca */}
-        <div className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           {currentTrack.albumCover ? (
+            <div className="relative h-10 w-10 flex-shrink-0">
+              {/* Poświata rozciągnięta do połowy paska */}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute -left-8 -top-8 h-28 w-72 rounded-full opacity-55 blur-3xl transition-all duration-700"
+                style={{
+                  backgroundImage: `url(${currentTrack.albumCover})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              />
               <img
                 src={currentTrack.albumCover}
                 alt={currentTrack.title}
-                className="h-10 w-10 flex-shrink-0 rounded-xl object-cover border border-teal-900/40"
+                className="relative z-10 h-10 w-10 rounded-xl object-cover border border-teal-900/40"
               />
-            ) : (
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#162125] border border-teal-900/40">
-                <Music className="h-5 w-5 text-teal-400/50" />
-              </div>
-            )}
+            </div>
+          ) : (
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#162125] border border-teal-900/40">
+              <Music className="h-5 w-5 text-teal-400/50" />
+            </div>
+          )}
+
           <div className="flex min-w-0 flex-col truncate">
             <span className="truncate text-xs font-bold text-white">
               {currentTrack.title}
