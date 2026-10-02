@@ -48,6 +48,13 @@ const themeScript = `
       document.documentElement.classList.remove('light');
     }
   } catch (e) {}
+
+  console.log(
+    "%c☕ Songify Dev Info%c\\njak już tu dotarłeś to możesz docenić pracę i wysłać 10zł na kawę\\n%cPaypal: dklimczuk898@gmail.com",
+    "color: #14b8a6; font-size: 15px; font-weight: bold;",
+    "color: #e2e8f0; font-size: 12px; margin-top: 4px;",
+    "color: #38bdf8; font-size: 12px; font-weight: bold; background: #0e1619; padding: 3px 6px; border-radius: 4px; border: 1px solid #134e4a;"
+  );
 `;
 
 export default function RootLayout({
