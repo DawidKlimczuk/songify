@@ -211,7 +211,6 @@ export default function ConnectSyncEngine() {
         const currentMyId = useDeviceStore.getState().deviceId;
         if (!payload || (payload.senderId && payload.senderId === currentMyId)) return;
 
-        console.log("[Songify Connect] Odebrano zdalną komendę:", payload.type, payload);
         isHandlingRemoteActionRef.current = true;
 
         switch (payload.type) {
@@ -543,7 +542,6 @@ export async function sendConnectCommand(command: {
         ...command,
       },
     });
-    console.log("[Songify Connect] Wysłano komendę:", command.type, command);
   } catch (err) {
     console.error("[Songify Connect] Błąd wysyłania komendy:", err);
   }
