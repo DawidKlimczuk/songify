@@ -8,82 +8,114 @@ export async function GET(request: Request) {
     return NextResponse.json({ data: [] });
   }
 
-  try {
-    const res = await fetch(
-      `https://api.deezer.com/search?q=${encodeURIComponent(q.trim())}&limit=20`
-    );
-    const data = await res.json();
+  // Zamieniamy kropki i przecinki na spacje, żeby np. "Mr.Polska" nie zlewało się w jedno słowo
+  const cleanQ = q
+    .replace(/\./g, " ")
+    .replace(/[,;&/]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
-    if (!data || !Array.isArray(data.data)) {
-      return NextResponse.json({ data: [] });
+  try {
+    // 1. DEEZER
+    const deezerRes = await fetch(
+      `https://api.deezer.com/search?q=${encodeURIComponent(cleanQ)}&limit=20`,
+      { cache: "no-store" }
+    );
+    const deezerData = await deezerRes.json();
+
+    if (deezerData && Array.isArray(deezerData.data) && deezerData.data.length > 0) {
+      const enrichedTracks = await Promise.all(
+        deezerData.data.map(async (track: any) => {
+          try {
+            const detailRes = await fetch(
+              `https://api.deezer.com/track/${track.id}`,
+              { next: { revalidate: 3600 } }
+            );
+            const detailData = await detailRes.json();
+
+            let artistNames: string[] = [];
+            if (
+              detailData.contributors &&
+              Array.isArray(detailData.contributors) &&
+              detailData.contributors.length > 0
+            ) {
+              artistNames = detailData.contributors
+                .map((c: any) => c.name?.trim())
+                .filter(Boolean);
+            }
+
+            let cleanedTitle = track.title;
+            const featMatch = track.title.match(
+              /\((?:feat\.\vert{}ft\.\vert{}featuring)\s*([^)]+)\)/i
+            );
+            if (featMatch && featMatch[1]) {
+              const extraArtists = featMatch[1]
+                .split(/,|&|\+/g)
+                .map((s: string) => s.trim())
+                .filter(Boolean);
+              artistNames.push(...extraArtists);
+              cleanedTitle = track.title
+                .replace(/\s*\((?:feat\.\vert{}ft\.\vert{}featuring)[^)]*\)/i, "")
+                .trim();
+            }
+
+            const uniqueArtists = Array.from(
+              new Set(
+                artistNames.length > 0
+                  ? artistNames
+                  : [track.artist?.name || "Nieznany wykonawca"]
+              )
+            );
+
+            return {
+              ...track,
+              title: cleanedTitle,
+              artist: {
+                ...track.artist,
+                name: uniqueArtists.join(", "),
+              },
+            };
+          } catch {
+            return track;
+          }
+        })
+      );
+
+      return NextResponse.json({ data: enrichedTracks });
     }
 
-    // Równoległe dociągnięcie szczegółów utworów (dla tablicy contributors)
-    const enrichedTracks = await Promise.all(
-      data.data.map(async (track: any) => {
-        try {
-          const detailRes = await fetch(
-            `https://api.deezer.com/track/${track.id}`,
-            { next: { revalidate: 3600 } } // cache na 1h
-          );
-          const detailData = await detailRes.json();
+    // 2. APPLE MUSIC / ITUNES FALLBACK (z country=PL oraz explicit=Yes)
+    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanQ)}&country=PL&media=music&entity=song&explicit=Yes&limit=20`;
+    const itunesRes = await fetch(itunesUrl, {
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      cache: "no-store",
+    });
 
-          let artistNames: string[] = [];
+    if (itunesRes.ok) {
+      const itunesData = await itunesRes.json();
+      if (itunesData.results && itunesData.results.length > 0) {
+        const mapped = itunesData.results.map((item: any) => ({
+          id: `itunes_${item.trackId}`,
+          title: item.trackName,
+          duration: Math.round((item.trackTimeMillis || 0) / 1000),
+          artist: {
+            name: item.artistName,
+          },
+          album: {
+            title: item.collectionName,
+            cover: item.artworkUrl100,
+            cover_medium: item.artworkUrl100?.replace("100x100bb", "300x300bb"),
+            cover_big: item.artworkUrl100?.replace("100x100bb", "600x600bb"),
+            cover_xl: item.artworkUrl100?.replace("100x100bb", "1000x1000bb"),
+          },
+        }));
+        return NextResponse.json({ data: mapped });
+      }
+    }
 
-          if (
-            detailData.contributors &&
-            Array.isArray(detailData.contributors) &&
-            detailData.contributors.length > 0
-          ) {
-            artistNames = detailData.contributors
-              .map((c: any) => c.name?.trim())
-              .filter(Boolean);
-          }
-
-          // Jeśli w contributors nie było więcej osób, sprawdzamy czy feat nie ukrył się w tytule
-          let cleanedTitle = track.title;
-          const featMatch = track.title.match(
-            /\((?:feat\.|ft\.|featuring)\s*([^)]+)\)/i
-          );
-          if (featMatch && featMatch[1]) {
-            const extraArtists = featMatch[1]
-              .split(/,|&|\+/g)
-              .map((s: string) => s.trim())
-              .filter(Boolean);
-            artistNames.push(...extraArtists);
-            // Opcjonalnie usuwamy dopisek (feat. ...) z samego tytułu dla czystszego widoku
-            cleanedTitle = track.title
-              .replace(/\s*\((?:feat\.|ft\.|featuring)[^)]*\)/i, "")
-              .trim();
-          }
-
-          // Usuwamy duplikaty i łączymy po przecinku
-          const uniqueArtists = Array.from(
-            new Set(
-              artistNames.length > 0
-                ? artistNames
-                : [track.artist?.name || "Nieznany wykonawca"]
-            )
-          );
-
-          return {
-            ...track,
-            title: cleanedTitle,
-            artist: {
-              ...track.artist,
-              name: uniqueArtists.join(", "),
-            },
-          };
-        } catch {
-          // Fallback, jeśli dociągnięcie detali nie przeszło
-          return track;
-        }
-      })
-    );
-
-    return NextResponse.json({ data: enrichedTracks });
+    return NextResponse.json({ data: [] });
   } catch (err) {
-    console.error("Błąd API wyszukiwarki Deezer:", err);
+    console.error("Błąd search:", err);
     return NextResponse.json({ error: "Błąd serwera" }, { status: 500 });
   }
 }

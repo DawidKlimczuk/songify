@@ -28,6 +28,8 @@ model Playlist {
   songs     PlaylistSong[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
+  description String?   @db.VarChar(300)
+  is_public   Boolean   @default(true)
 }
 
 model Song {

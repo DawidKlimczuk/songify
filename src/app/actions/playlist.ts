@@ -48,13 +48,28 @@ export async function getUserPlaylists() {
         select: { songs: true },
       },
       songs: {
-        select: { songId: true },
+        orderBy: { addedAt: "desc" },
+        take: 4,
+        include: {
+          song: {
+            select: {
+              albumCover: true,
+            },
+          },
+        },
       },
     },
     orderBy: { createdAt: "asc" },
   });
 
-  return playlists.sort((a: any, b: any) => {
+  const formattedPlaylists = playlists.map((p: any) => ({
+    ...p,
+    songs: (p.songs || []).map((ps: any) => ({
+      albumCover: ps.song?.albumCover || null,
+    })),
+  }));
+
+  return formattedPlaylists.sort((a: any, b: any) => {
     if (a.name === LIKED_PLAYLIST_NAME) return -1;
     if (b.name === LIKED_PLAYLIST_NAME) return 1;
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
@@ -144,18 +159,47 @@ export async function isTrackLiked(trackId: string | number) {
   return count > 0;
 }
 
-export async function createPlaylist(name: string) {
+export async function createPlaylist(input?: {
+  name?: string;
+  description?: string;
+  coverUrl?: string | null;
+  isPublic?: boolean;
+} | string) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Brak autoryzacji");
 
+  const data = typeof input === "string" ? { name: input } : input || {};
+
+  let finalName = data.name?.trim();
+
+  // Jeśli użytkownik nie wpisał nazwy -> liczymy jego playlisty bez Polubionych
+  if (!finalName) {
+    const existingCount = await prisma.playlist.count({
+      where: {
+        userId: user.id,
+        name: { not: LIKED_PLAYLIST_NAME },
+      },
+    });
+    finalName = `Moja playlista #${existingCount + 1}`;
+  }
+
+  const finalDescription = data.description ? data.description.trim().slice(0, 300) : null;
+  const isPublicVal = data.isPublic !== undefined ? Boolean(data.isPublic) : true;
+  const coverUrlVal = data.coverUrl || null;
+
   const playlist = await prisma.playlist.create({
     data: {
-      name,
+      name: finalName,
       userId: user.id,
-    },
+      coverUrl: coverUrlVal,
+      ...({
+        description: finalDescription,
+        is_public: isPublicVal,
+      } as any),
+    } as any,
   });
 
   revalidatePath("/library");
@@ -518,4 +562,139 @@ export async function updateSongCover(songId: string | number, albumCover: strin
     console.error("Błąd aktualizacji okładki w bazie:", error);
     return { success: false };
   }
+}
+
+export async function importPlaylistFromTracks(params: {
+  name?: string;
+  description?: string;
+  coverUrl?: string | null;
+  isPublic?: boolean;
+  tracks: Array<{
+    id: string | number;
+    title: string;
+    artist: string;
+    albumCover: string;
+    duration?: number;
+  }>;
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Brak autoryzacji");
+
+  let finalName = params.name?.trim().slice(0, 80);
+  if (!finalName) {
+    const existingCount = await prisma.playlist.count({
+      where: {
+        userId: user.id,
+        name: { not: LIKED_PLAYLIST_NAME },
+      },
+    });
+    finalName = `Moja playlista #${existingCount + 1}`;
+  }
+
+  const finalDescription = params.description ? params.description.trim().slice(0, 300) : null;
+  const isPublicVal = params.isPublic !== undefined ? Boolean(params.isPublic) : true;
+  const coverUrlVal = params.coverUrl || null;
+
+  // 1. Tworzymy playlistę
+  const newPlaylist = await prisma.playlist.create({
+    data: {
+      name: finalName,
+      userId: user.id,
+      coverUrl: coverUrlVal,
+      ...({
+        description: finalDescription,
+        is_public: isPublicVal,
+      } as any),
+    } as any,
+  });
+
+  // 2. Jeśli są utwory, wstawiamy je paczkami po 100
+  if (params.tracks && params.tracks.length > 0) {
+    const sanitizedTracks = params.tracks.map((t) => ({
+      ...t,
+      id: String(t.id).replace("spotify:track:", "").trim(),
+      artist: t.artist.replace(/;/g, ", "),
+    }));
+
+    const baseTimestamp = Date.now();
+    const BATCH_SIZE = 100;
+
+    for (let i = 0; i < sanitizedTracks.length; i += BATCH_SIZE) {
+      const chunk = sanitizedTracks.slice(i, i + BATCH_SIZE);
+
+      await prisma.$transaction(
+        chunk.flatMap((track, idx) => {
+          const globalIdx = i + idx;
+          const simulatedAddedAt = new Date(baseTimestamp + (sanitizedTracks.length - globalIdx) * 1000);
+
+          return [
+            prisma.song.upsert({
+              where: { id: track.id },
+              update: {},
+              create: {
+                id: track.id,
+                title: track.title,
+                artist: track.artist,
+                albumCover: track.albumCover || "",
+                duration: track.duration ? Math.round(track.duration) : null,
+              },
+            }),
+            prisma.playlistSong.create({
+              data: {
+                playlistId: newPlaylist.id,
+                songId: track.id,
+                addedAt: simulatedAddedAt,
+              },
+            }),
+          ];
+        })
+      );
+    }
+  }
+
+  revalidatePath("/library");
+  return newPlaylist;
+}
+
+export async function overrideYouTubeTrack(title: string, artist: string, videoId: string) {
+  const supabase = await createClient();
+
+  const normalize = (txt: string) =>
+    txt
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const mainArtist = (artist || "").split(/[,;&/]/)[0].trim();
+
+  // Zapisujemy wszystkie możliwe warianty zapytania z odtwarzacza
+  const queriesToSave = Array.from(
+    new Set([
+      normalize(`${title} ${artist}`),
+      normalize(`${title} ${mainArtist}`),
+      normalize(title),
+      normalize(`${artist} ${title}`),
+      normalize(`${mainArtist} ${title}`),
+    ])
+  ).filter(Boolean);
+
+  const rows = queriesToSave.map((q) => ({
+    query: q,
+    video_id: videoId,
+  }));
+
+  const { error } = await supabase
+    .from("youtube_cache")
+    .upsert(rows, { onConflict: "query" });
+
+  if (error) {
+    console.error("Błąd nadpisywania youtube_cache:", error);
+    throw new Error("Nie udało się zapisać linku w bazie.");
+  }
+
+  return { success: true };
 }

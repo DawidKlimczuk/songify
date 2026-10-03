@@ -2,9 +2,12 @@
 
 import { useState, useEffect, useRef } from "react";
 import { usePlayerStore } from "@/lib/store/player-store";
-import { toggleLikeTrack, isTrackLiked, addSongToPlaylist, updateSongCover } from "@/app/actions/playlist";
+import { toggleLikeTrack, isTrackLiked, addSongToPlaylist, updateSongCover, overrideYouTubeTrack } from "@/app/actions/playlist";
 import { sendConnectCommand } from "@/components/player/ConnectSyncEngine";
 import {
+  MoreVertical,
+  Disc3,
+  AlertTriangle,
   ChevronDown,
   Heart,
   Shuffle,
@@ -28,9 +31,21 @@ import {
   Volume2,
   Moon,
   Laptop,
+  Link as LinkIcon,
 } from "lucide-react";
 import { useDeviceStore } from "@/lib/store/device-store";
 import DevicePickerModal from "./DevicePickerModal";
+function YoutubeIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24">
+      <path
+        fill="#FF0000"
+        d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
+      />
+      <polygon fill="#FFFFFF" points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" />
+    </svg>
+  );
+}
 
 export default function FullPlayer() {
   const {
@@ -120,6 +135,106 @@ export default function FullPlayer() {
   const [isFetchingCover, setIsFetchingCover] = useState(false);
   const [quickAddedSuccess, setQuickAddedSuccess] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+
+  // Stany dla menu trzech kropek, przeładowania i ręcznego linku okładki
+  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
+  const [isReloadCoverModalOpen, setIsReloadCoverModalOpen] = useState(false);
+  const [isReloadingCover, setIsReloadingCover] = useState(false);
+
+  const [isCustomCoverModalOpen, setIsCustomCoverModalOpen] = useState(false);
+  const [customCoverUrl, setCustomCoverUrl] = useState("");
+  const [isSavingCustomCover, setIsSavingCustomCover] = useState(false);
+  const [customCoverError, setCustomCoverError] = useState<string | null>(null);
+
+  // Ręczny zapis wklejonego łącza do okładki w bazie danych
+  const handleSaveCustomCover = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentTrack || isSavingCustomCover) return;
+
+    const trimmedUrl = customCoverUrl.trim();
+    if (!trimmedUrl) {
+      setCustomCoverError("Wklej bezpośredni link do grafiki.");
+      return;
+    }
+
+    if (!trimmedUrl.startsWith("http://") && !trimmedUrl.startsWith("https://")) {
+      setCustomCoverError("Link musi zaczynać się od https:// lub http://");
+      return;
+    }
+
+    setIsSavingCustomCover(true);
+    setCustomCoverError(null);
+
+    try {
+      // 1. Zapisujemy na stałe w bazie danych Supabase/Prisma
+      await updateSongCover(currentTrack.id, trimmedUrl);
+
+      // 2. Natychmiast aktualizujemy stan odtwarzacza
+      const updated = { ...currentTrack, albumCover: trimmedUrl };
+      setCurrentTrack(updated);
+
+      setIsCustomCoverModalOpen(false);
+      setCustomCoverUrl("");
+    } catch (err) {
+      console.error("Błąd zapisu własnej okładki:", err);
+      setCustomCoverError("Nie udało się zapisać okładki w bazie danych.");
+    } finally {
+      setIsSavingCustomCover(false);
+    }
+  };
+
+  // Stany dla ręcznego linku YouTube
+  const [isCustomYtModalOpen, setIsCustomYtModalOpen] = useState(false);
+  const [customYtUrl, setCustomYtUrl] = useState("");
+  const [isSavingCustomYt, setIsSavingCustomYt] = useState(false);
+  const [customYtError, setCustomYtError] = useState<string | null>(null);
+
+  // Wyciąganie ID filmu z linku
+  const extractYouTubeId = (url: string): string | null => {
+    const clean = url.trim();
+    if (clean.length === 11 && !clean.includes("/") && !clean.includes(".")) {
+      return clean;
+    }
+    const match = clean.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    return match ? match[1] : null;
+  };
+
+  const handleSaveCustomYouTube = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentTrack || isSavingCustomYt) return;
+
+    const videoId = extractYouTubeId(customYtUrl);
+    if (!videoId) {
+      setCustomYtError("Wklej poprawny link do filmu YouTube (np. https://www.youtube.com/watch?v=...).");
+      return;
+    }
+
+    setIsSavingCustomYt(true);
+    setCustomYtError(null);
+
+    try {
+      // 1. Zapisujemy w bazie warianty zapytania z nowym videoId
+      await overrideYouTubeTrack(currentTrack.title, currentTrack.artist || "", videoId);
+
+      // 2. Wymuszamy natychmiastowe odświeżenie audio w playerze
+      const updatedTrack = {
+        ...currentTrack,
+        youtubeId: videoId,
+        _forcedTimestamp: Date.now(),
+      };
+
+      setCurrentTrack(updatedTrack);
+      seekTo(0);
+
+      setIsCustomYtModalOpen(false);
+      setCustomYtUrl("");
+    } catch (err: any) {
+      console.error("Błąd zapisu YouTube linku:", err);
+      setCustomYtError(err.message || "Błąd podczas zapisywania linku w bazie.");
+    } finally {
+      setIsSavingCustomYt(false);
+    }
+  };
 
   const handleQuickAddToPlaylist = async () => {
     if (!currentTrack || isQuickAdding) return;
@@ -211,7 +326,7 @@ export default function FullPlayer() {
     }
   };
 
-  // Dociąganie okładki dla aktualnie odtwarzanego utworu (samodzielny hook na poziomie komponentu)
+  // Dociąganie okładki dla aktualnie odtwarzanego utworu
   useEffect(() => {
     const hasCover = Boolean(currentTrack?.albumCover && currentTrack.albumCover.trim() !== "");
     if (!currentTrack || hasCover) return;
@@ -243,6 +358,54 @@ export default function FullPlayer() {
     };
   }, [currentTrack?.id]);
 
+  // Wymuszenie przeładowania okładki z API i zaktualizowanie bazy dla wszystkich
+  const handleForceReloadCover = async () => {
+    if (!currentTrack || isReloadingCover) return;
+    setIsReloadingCover(true);
+
+    try {
+      const cleanTitle = (currentTrack.title || "")
+        .replace(/\(.*?\)/g, "")
+        .replace(/\[.*?\]/g, "")
+        .replace(/feat\..*$/gi, "")
+        .replace(/ft\..*$/gi, "")
+        .trim();
+
+      const fullArtist = (currentTrack.artist || "").trim();
+
+      // Wyciągamy album jeśli istnieje w obiekcie utworu
+      const trackAlbum = (
+        (currentTrack as any).album?.title ||
+        (currentTrack as any).album ||
+        (currentTrack as any).albumName ||
+        ""
+      ).trim();
+
+      const queryParams = new URLSearchParams({
+        title: cleanTitle,
+        artist: fullArtist,
+        album: trackAlbum,
+        t: String(Date.now()),
+      });
+
+      const res = await fetch(`/api/deezer/cover?${queryParams.toString()}`, {
+        cache: "no-store",
+      });
+      const data = res.ok ? await res.json() : null;
+
+      const nextCover = typeof data?.cover === "string" ? data.cover : "";
+      const updated = { ...currentTrack, albumCover: nextCover };
+      setCurrentTrack(updated);
+      await updateSongCover(currentTrack.id, nextCover);
+
+      setIsReloadCoverModalOpen(false);
+    } catch (err) {
+      console.error("Błąd wymuszenia okładki:", err);
+    } finally {
+      setIsReloadingCover(false);
+    }
+  };
+
   if (!isPlayerExpanded || !currentTrack) return null;
 
   const handleShare = async () => {
@@ -271,8 +434,6 @@ export default function FullPlayer() {
   const isLongTitle = currentTrack.title.length > 20;
   const isLongArtist = (currentTrack.artist || "").length > 26;
 
-  // Im dłuższy tekst, tym więcej sekund na obrót (stała, spokojna prędkość czytania):
-  // ~0.35s na każdy znak + 6s bazy na pauzę na starcie
   const artistLoopDuration = Math.max(16, Math.round((currentTrack.artist || "").length * 0.38 + 6));
   const titleLoopDuration = Math.max(12, Math.round(currentTrack.title.length * 0.4 + 5));
   const displayedTime = scrubbingTime !== null ? scrubbingTime : currentTime;
@@ -304,7 +465,7 @@ export default function FullPlayer() {
       <div className="relative z-10 flex items-center justify-between">
         <button
           onClick={() => setPlayerExpanded(false)}
-          className="p-2 text-gray-400 hover:text-white transition"
+          className="p-2 text-gray-400 hover:text-white transition cursor-pointer"
         >
           <ChevronDown className="h-6 w-6" />
         </button>
@@ -318,7 +479,15 @@ export default function FullPlayer() {
           </span>
         </div>
 
-        <div className="w-10" />
+        {/* Przycisk trzech kropek (Otwiera modal opcji) */}
+        <button
+          type="button"
+          onClick={() => setIsOptionsMenuOpen(true)}
+          className="p-2 text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] [html.light_&]:hover:opacity-75 transition active:scale-90 cursor-pointer"
+          title="Więcej opcji"
+        >
+          <MoreVertical className="h-6 w-6 stroke-[2.2]" />
+        </button>
       </div>
 
       <div className="my-auto flex flex-col items-center w-full relative z-10">
@@ -388,7 +557,7 @@ export default function FullPlayer() {
 
           <button
             onClick={handleLikeClick}
-            className={`p-2 transition active:scale-90 flex-shrink-0 z-10 ${
+            className={`p-2 transition active:scale-90 flex-shrink-0 z-10 cursor-pointer ${
               animatingHeart ? "animate-heart-shake" : ""
             }`}
           >
@@ -403,18 +572,14 @@ export default function FullPlayer() {
 
       <div className="w-full max-w-[340px] mx-auto space-y-4">
         <div className="w-full">
-          {/* Kontener paska z idealnie widocznym wypełnieniem */}
           <div className="relative flex items-center h-4 w-full cursor-pointer group">
-            {/* Tło paska (szary tor) */}
             <div className="absolute w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
-              {/* Turkusowe podświetlenie odtworzonej części */}
               <div
                 className="h-full bg-teal-400 rounded-full transition-[width] duration-75"
                 style={{ width: `${Math.min(Math.max(progressPercent, 0), 100)}%` }}
               />
             </div>
 
-            {/* Niewidzialny input chwytający dotyk i suwak */}
             <input
               type="range"
               min={0}
@@ -430,7 +595,6 @@ export default function FullPlayer() {
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
             />
 
-            {/* Kropka (Thumb) podążająca za paskiem */}
             <div
               className="absolute h-3.5 w-3.5 -ml-1.5 rounded-full bg-teal-400 shadow-md shadow-teal-500/50 pointer-events-none transition-[left] duration-75"
               style={{
@@ -446,7 +610,6 @@ export default function FullPlayer() {
         </div>
 
         <div className="flex items-center justify-between px-2">
-          {/* Przełącznik trybu odtwarzania: Strzałka (po kolei) <-> Przeplatane (losowo) */}
           <button
             onClick={() => {
               toggleShuffle();
@@ -457,7 +620,7 @@ export default function FullPlayer() {
                 queue: state.queue,
               });
             }}
-            className="p-2 text-gray-400 hover:text-white transition active:scale-90"
+            className="p-2 text-gray-400 hover:text-white transition active:scale-90 cursor-pointer"
             title={isShuffle ? "Odtwarzanie losowe" : "Odtwarzanie po kolei"}
           >
             {isShuffle ? (
@@ -467,22 +630,20 @@ export default function FullPlayer() {
             )}
           </button>
 
-          {/* Przycisk Poprzedni */}
           <button
             onClick={previousTrack}
-            className="p-2 text-gray-300 hover:text-white transition active:scale-90"
+            className="p-2 text-gray-300 hover:text-white transition active:scale-90 cursor-pointer"
             title="Poprzedni utwór"
           >
             <SkipBack className="h-7 w-7" />
           </button>
 
-          {/* Play / Pause */}
           <button
             onClick={() => {
               if (isLoadingAudio) return;
               togglePlay();
             }}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/30 transition hover:scale-105 active:scale-95"
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/30 transition hover:scale-105 active:scale-95 cursor-pointer"
           >
             {isPlaying ? (
               <Pause className="h-7 w-7 fill-black" />
@@ -491,16 +652,14 @@ export default function FullPlayer() {
             )}
           </button>
 
-          {/* Przycisk Następny */}
           <button
             onClick={() => nextTrack()}
-            className="p-2 text-gray-300 hover:text-white transition active:scale-90"
+            className="p-2 text-gray-300 hover:text-white transition active:scale-90 cursor-pointer"
             title="Następny utwór"
           >
             <SkipForward className="h-7 w-7" />
           </button>
 
-          {/* Przycisk powtarzania (off -> playlist -> track) */}
           <button
             onClick={() => {
               const modes: ("off" | "playlist" | "track")[] = ["off", "playlist", "track"];
@@ -512,7 +671,7 @@ export default function FullPlayer() {
                 mode: nextMode,
               });
             }}
-            className={`p-2 transition relative active:scale-90 ${
+            className={`p-2 transition relative active:scale-90 cursor-pointer ${
               repeatMode !== "off"
                 ? "text-teal-400"
                 : "text-gray-400 hover:text-white"
@@ -536,12 +695,10 @@ export default function FullPlayer() {
           </button>
         </div>
 
-        {/* Dolny pasek akcji: 5 czystych, równych ikon ze Spotify Connect */}
         <div className="flex items-center justify-between px-3 pt-2">
-          {/* Przycisk Kolejki Odtwarzania */}
           <button
             onClick={() => setIsQueueOpen(true)}
-            className={`p-2 transition active:scale-90 ${
+            className={`p-2 transition active:scale-90 cursor-pointer ${
               isQueueOpen
                 ? "text-teal-400 [html.light_&]:!text-[#db2777]"
                 : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
@@ -551,10 +708,9 @@ export default function FullPlayer() {
             <ListMusic className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
           </button>
 
-          {/* Przycisk Urządzenia (Songify Connect) */}
           <button
             onClick={() => setDevicePickerOpen(true)}
-            className={`p-2 transition active:scale-90 ${
+            className={`p-2 transition active:scale-90 cursor-pointer ${
               isPlayingRemotely
                 ? "text-teal-400 animate-pulse [html.light_&]:!text-[#db2777]"
                 : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
@@ -564,28 +720,17 @@ export default function FullPlayer() {
             <Laptop className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
           </button>
 
-          {/* Przycisk Dodaj do playlisty (otwiera modal wyboru playlist) */}
           <button
             onClick={() => setAddToPlaylistOpen(true)}
-            className="p-2 text-gray-400 hover:text-white transition active:scale-90 [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
+            className="p-2 text-gray-400 hover:text-white transition active:scale-90 cursor-pointer [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
             title="Dodaj do playlisty"
           >
             <FolderPlus className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
           </button>
 
-          {/* Przycisk Udostępnij */}
-          <button
-            onClick={handleShare}
-            className="p-2 text-gray-400 hover:text-white transition active:scale-90 [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
-            title="Udostępnij utwór"
-          >
-            <Share2 className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
-          </button>
-
-          {/* Przycisk Sleep Timer */}
           <button
             onClick={() => setIsSleepModalOpen(true)}
-            className={`flex items-center gap-1.5 p-2 transition active:scale-90 ${
+            className={`flex items-center gap-1.5 p-2 transition active:scale-90 cursor-pointer ${
               sleepTimerEndsAt || sleepTimerMode === "end_of_track"
                 ? "text-teal-400 font-bold [html.light_&]:!text-[#db2777]"
                 : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
@@ -606,10 +751,9 @@ export default function FullPlayer() {
         </div>
       </div>
 
-      {/* Dopracowany widok Kolejki - idealny w motywie ciemnym i jasnym */}
+      {/* Widok Kolejki */}
       {isQueueOpen && (
         <div className="fixed inset-0 z-50 flex flex-col bg-[#070b0d] text-white px-5 pt-4 pb-8 select-none animate-in slide-in-from-bottom-3 duration-200">
-          {/* Górna belka */}
           <div className="flex items-center justify-between pb-3 border-b border-teal-950/60">
             <div>
               <h2 className="text-xl font-bold tracking-tight text-white">Kolejka</h2>
@@ -619,15 +763,13 @@ export default function FullPlayer() {
             </div>
             <button
               onClick={() => setIsQueueOpen(false)}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#121c20] border border-teal-900/60 text-gray-300 hover:text-white transition active:scale-90"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#121c20] border border-teal-900/60 text-gray-300 hover:text-white transition active:scale-90 cursor-pointer"
             >
               <X className="h-5 w-5" />
             </button>
           </div>
 
-          {/* Główna lista - BEZ SUWAKA */}
           <div className="flex-1 overflow-y-auto space-y-4 pt-3 pr-0.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            {/* SEKCJA 1: TERAZ ODTWARZANE */}
             <div>
               <span className="text-[10px] font-extrabold uppercase tracking-widest text-teal-400">
                 Teraz odtwarzane
@@ -664,7 +806,7 @@ export default function FullPlayer() {
 
                 <button
                   onClick={togglePlay}
-                  className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-400 text-black shadow-md shadow-teal-500/30 transition hover:scale-105 active:scale-90"
+                  className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-teal-400 text-black shadow-md shadow-teal-500/30 transition hover:scale-105 active:scale-90 cursor-pointer"
                 >
                   {isPlaying && !isLoadingAudio ? (
                     <Pause className="h-5 w-5 fill-black" />
@@ -675,7 +817,6 @@ export default function FullPlayer() {
               </div>
             </div>
 
-            {/* SEKCJA 2: NASTĘPNE W KOLEJCE */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-widest text-gray-400">
@@ -719,7 +860,6 @@ export default function FullPlayer() {
                           }
                         }}
                       >
-                        {/* TŁO GESTÓW SWIPE */}
                         {isBeingSwiped && Math.abs(offsetX) > 8 && (
                           <div
                             className={`absolute inset-0 flex items-center justify-between px-4 z-0 ${
@@ -740,7 +880,6 @@ export default function FullPlayer() {
                           </div>
                         )}
 
-                        {/* KARTA UTWORU */}
                         <div
                           draggable
                           onDragStart={() => setDraggedIdx(actualIdx)}
@@ -852,7 +991,6 @@ export default function FullPlayer() {
                             </div>
                           </div>
 
-                          {/* Chwytak do przesuwania góra/dół */}
                           <div
                             className="p-1 text-gray-500 hover:text-teal-400 transition cursor-grab active:cursor-grabbing flex-shrink-0"
                             title="Przeciągnij, aby zmienić kolejność"
@@ -871,11 +1009,10 @@ export default function FullPlayer() {
         </div>
       )}
 
-      {/* Modal Sleep Timera - z czytelnymi kolorami w Dark i Light */}
+      {/* Modal Sleep Timera */}
       {isSleepModalOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 px-4 pb-6 sm:pb-0 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-xs rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612] [html.light_&]:shadow-2xl [html.light_&]:shadow-[#f472b6]/20">
-            {/* Nagłówek */}
             <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-3">
               <div className="flex items-center gap-2">
                 <Moon className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
@@ -885,13 +1022,12 @@ export default function FullPlayer() {
               </div>
               <button
                 onClick={() => setIsSleepModalOpen(false)}
-                className="p-1.5 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] [html.light_&]:hover:bg-[#fce7f3] transition"
+                className="p-1.5 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] [html.light_&]:hover:bg-[#fce7f3] transition cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Stan aktualnego timera (jeśli aktywny) */}
             {(sleepTimerEndsAt || sleepTimerMode) && (
               <div className="mb-4 rounded-xl bg-teal-950/40 border border-teal-800/40 p-2.5 flex items-center justify-between text-xs [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#fecdd3]">
                 <div>
@@ -914,19 +1050,16 @@ export default function FullPlayer() {
                       sleepTimerMode: null,
                     });
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 [html.light_&]:bg-[#fee2e2] [html.light_&]:text-[#dc2626] text-[11px] font-bold transition"
+                  className="px-2.5 py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 [html.light_&]:bg-[#fee2e2] [html.light_&]:text-[#dc2626] text-[11px] font-bold transition cursor-pointer"
                 >
                   Wyłącz
                 </button>
               </div>
             )}
 
-            {/* BĘBENEK / WAŁEK CZASU (1 - 60 MIN) */}
             <div className="relative my-3 flex flex-col items-center select-none">
-              {/* Podświetlony pasek środka wałka */}
               <div className="pointer-events-none absolute top-1/2 left-0 right-0 h-11 -translate-y-1/2 rounded-xl border border-teal-500/40 bg-teal-500/10 [html.light_&]:border-[#f472b6] [html.light_&]:bg-[#fdf2f8]" />
 
-              {/* Kontener scrolla wałka */}
               <div
                 ref={wheelRef}
                 onScroll={(e) => {
@@ -965,7 +1098,6 @@ export default function FullPlayer() {
               </div>
             </div>
 
-            {/* Przycisk: Koniec tego utworu */}
             <button
               onClick={() => {
                 setSleepTimer(null, "end_of_track");
@@ -976,7 +1108,7 @@ export default function FullPlayer() {
                   sleepTimerMode: "end_of_track",
                 });
               }}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border mb-3 text-xs font-semibold transition ${
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border mb-3 text-xs font-semibold transition cursor-pointer ${
                 sleepTimerMode === "end_of_track"
                   ? "border-teal-400 bg-teal-950/40 text-teal-300 [html.light_&]:border-[#db2777] [html.light_&]:bg-[#fdf2f8] [html.light_&]:text-[#be123c]"
                   : "border-teal-950/70 bg-[#121c20] text-gray-300 hover:text-teal-400 [html.light_&]:border-[#fce7f3] [html.light_&]:bg-[#fff5f7] [html.light_&]:text-[#9f1239] [html.light_&]:hover:border-[#fbcfe8]"
@@ -988,7 +1120,6 @@ export default function FullPlayer() {
               )}
             </button>
 
-            {/* Przycisk aktywacji wybranego czasu z rolki */}
             <button
               onClick={() => {
                 const endsAt = Date.now() + selectedWheelMinutes * 60 * 1000;
@@ -1000,10 +1131,298 @@ export default function FullPlayer() {
                   sleepTimerMode: "time",
                 });
               }}
-              className="w-full rounded-2xl bg-teal-400 py-3 text-xs font-bold text-black shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition [html.light_&]:bg-[#db2777] [html.light_&]:text-white [html.light_&]:shadow-[#db2777]/30 [html.light_&]:hover:bg-[#be123c]"
+              className="w-full rounded-2xl bg-teal-400 py-3 text-xs font-bold text-black shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition cursor-pointer [html.light_&]:bg-[#db2777] [html.light_&]:text-white [html.light_&]:shadow-[#db2777]/30 [html.light_&]:hover:bg-[#be123c]"
             >
               Ustaw wyłącznik na {selectedWheelMinutes} min
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 1. MODAL OPCJI (3 KROPKI) */}
+      {isOptionsMenuOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/75 px-4 pb-6 sm:pb-0 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-xs rounded-3xl border border-teal-900/80 bg-[#0c1417] p-4 shadow-2xl animate-in slide-in-from-bottom-4 duration-200 text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612] [html.light_&]:shadow-xl">
+            <div className="flex items-center justify-between pb-2.5 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-3">
+              <h3 className="text-sm font-bold tracking-tight text-white [html.light_&]:text-[#5c0612]">
+                Opcje utworu
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsOptionsMenuOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] transition cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOptionsMenuOpen(false);
+                  handleShare();
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#881337] [html.light_&]:hover:!bg-[#fae8ed] [html.light_&]:hover:!border-[#fbcfe8]"
+              >
+                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-500/15 text-teal-400 [html.light_&]:!bg-[#f43f5e]/10 [html.light_&]:!text-[#9f1239] flex-shrink-0 transition-colors">
+                  <Share2 
+                    className="h-4 w-4 !stroke-[#2dd4bf] [html.light_&]:!stroke-[#9f1239] !fill-none" 
+                    style={{ stroke: "currentColor", fill: "none" }}
+                    strokeWidth={2.2}
+                  />
+                </div>
+                <span className="font-semibold">Udostępnij utwór</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOptionsMenuOpen(false);
+                  setIsReloadCoverModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#881337] [html.light_&]:hover:!bg-[#fae8ed] [html.light_&]:hover:!border-[#fbcfe8]"
+              >
+                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-500/15 text-teal-400 [html.light_&]:!bg-[#f43f5e]/10 [html.light_&]:!text-[#9f1239] flex-shrink-0 transition-colors">
+                  <Disc3 
+                    className="h-4 w-4 !stroke-[#2dd4bf] [html.light_&]:!stroke-[#9f1239] !fill-none" 
+                    style={{ stroke: "currentColor", fill: "none" }}
+                    strokeWidth={2.2}
+                  />
+                </div>
+                <span className="font-semibold">Przeładuj okładkę</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOptionsMenuOpen(false);
+                  setCustomCoverUrl("");
+                  setCustomCoverError(null);
+                  setIsCustomCoverModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#881337] [html.light_&]:hover:!bg-[#fae8ed] [html.light_&]:hover:!border-[#fbcfe8]"
+              >
+                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-500/15 text-teal-400 [html.light_&]:!bg-[#f43f5e]/10 [html.light_&]:!text-[#9f1239] flex-shrink-0 transition-colors">
+                  <LinkIcon 
+                    className="h-4 w-4 !stroke-[#2dd4bf] [html.light_&]:!stroke-[#9f1239] !fill-none" 
+                    style={{ stroke: "currentColor", fill: "none" }}
+                    strokeWidth={2.2}
+                  />
+                </div>
+                <span className="font-semibold">Wklej link do okładki</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOptionsMenuOpen(false);
+                  setCustomYtUrl("");
+                  setCustomYtError(null);
+                  setIsCustomYtModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#881337] [html.light_&]:hover:!bg-[#fae8ed] [html.light_&]:hover:!border-[#fbcfe8]"
+              >
+                <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-500/15 [html.light_&]:!bg-[#f43f5e]/10 flex-shrink-0">
+                  <YoutubeIcon className="h-4 w-4" />
+                </div>
+                <span className="font-semibold">Podmień wersję audio (YouTube)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. MODAL POTWIERDZENIA PRZEŁADOWANIA OKŁADKI */}
+      {isReloadCoverModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl animate-in zoom-in-95 duration-200 text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]">
+            <div className="flex items-center gap-2.5 text-teal-400 [html.light_&]:text-[#db2777] mb-3">
+              <AlertTriangle className="h-5 w-5 flex-shrink-0" />
+              <h3 className="text-sm font-bold tracking-tight text-white [html.light_&]:text-[#5c0612]">
+                Przeładowanie okładki
+              </h3>
+            </div>
+
+            <p className="text-xs text-gray-300 leading-relaxed [html.light_&]:text-[#881337] mb-5">
+              Jeśli masz pewność że okładka nie zgadza się z piosenką kliknij poniższy przycisk <b>Przeładuj okładkę</b>.
+              <span className="block mt-2 text-gray-400 [html.light_&]:text-[#9f1239]">
+                Nie naduzywaj tej opcji , okładka powinna sie zmienić na poprawną po pierwszym przeładowaniu jeśli tak nie jest wyślij zrzut ekranu do administratora aplikacji.
+              </span>
+            </p>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsReloadCoverModalOpen(false)}
+                disabled={isReloadingCover}
+                className="rounded-xl px-4 py-2.5 text-xs font-semibold text-gray-400 hover:text-white transition cursor-pointer [html.light_&]:text-[#9f1239] [html.light_&]:hover:text-[#5c0612]"
+              >
+                Anuluj
+              </button>
+              <button
+                type="button"
+                onClick={handleForceReloadCover}
+                disabled={isReloadingCover}
+                className="flex items-center gap-2 rounded-xl bg-teal-400 px-4 py-2.5 text-xs font-bold text-black shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition disabled:opacity-50 cursor-pointer [html.light_&]:bg-[#db2777] [html.light_&]:text-white"
+              >
+                {isReloadingCover && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                <span>{isReloadingCover ? "Przeładowywanie..." : "Przeładuj okładkę"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+{/* 3. MODAL WKLEJANIA BEZPOŚREDNIEGO LINKU DO OKŁADKI */}
+      {isCustomCoverModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl animate-in zoom-in-95 duration-200 text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]">
+            <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-4">
+              <div className="flex items-center gap-2">
+                <LinkIcon className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                <h3 className="text-sm font-bold tracking-tight">Wklej link do okładki</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCustomCoverModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] transition cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCustomCover} className="space-y-4">
+              <p className="text-[11px] text-gray-300 [html.light_&]:text-[#881337] leading-relaxed">
+                Skopiuj i wklej bezpośredni adres grafiki (np. z Apple Music, Spotify lub wyszukiwarki). Okładka natychmiast nadpisze się w bazie danych dla tego utworu.
+              </p>
+
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5 [html.light_&]:text-[#9f1239]">
+                  Link URL okładki
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://is1-ssl.mzstatic.com/image/..."
+                  value={customCoverUrl}
+                  onChange={(e) => {
+                    setCustomCoverUrl(e.target.value);
+                    if (customCoverError) setCustomCoverError(null);
+                  }}
+                  className="w-full rounded-xl border border-teal-900/60 bg-[#162125] px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:border-teal-400 focus:outline-none [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]"
+                />
+              </div>
+
+              {/* Podgląd grafiki w czasie rzeczywistym */}
+              {customCoverUrl.trim().startsWith("http") && (
+                <div className="flex items-center gap-3 p-2 rounded-2xl bg-[#121c20] border border-teal-950/60 [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#fecdd3]">
+                  <img
+                    src={customCoverUrl.trim()}
+                    alt="Podgląd"
+                    className="h-12 w-12 rounded-xl object-cover bg-black/40 flex-shrink-0"
+                    onError={() => setCustomCoverError("Podany link nie jest poprawnym adresem obrazka.")}
+                  />
+                  <div className="flex flex-col truncate text-[11px]">
+                    <span className="font-semibold text-white [html.light_&]:text-[#5c0612]">Podgląd okładki</span>
+                    <span className="text-gray-400 truncate [html.light_&]:text-[#9f1239]">{customCoverUrl}</span>
+                  </div>
+                </div>
+              )}
+
+              {customCoverError && (
+                <div className="rounded-xl bg-red-950/40 border border-red-800/50 p-2.5 text-xs text-red-300">
+                  {customCoverError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomCoverModalOpen(false)}
+                  disabled={isSavingCustomCover}
+                  className="rounded-xl px-4 py-2.5 text-xs font-semibold text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] cursor-pointer"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCustomCover || !customCoverUrl.trim()}
+                  className="flex items-center gap-2 rounded-xl bg-teal-400 px-4 py-2.5 text-xs font-bold text-black hover:bg-teal-300 disabled:opacity-50 cursor-pointer [html.light_&]:bg-[#db2777] [html.light_&]:text-white shadow-lg shadow-teal-500/20"
+                >
+                  {isSavingCustomCover && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>{isSavingCustomCover ? "Zapisywanie..." : "Zapisz okładkę"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. MODAL PODMIANY LINKU DO AUDIO Z YOUTUBE */}
+      {isCustomYtModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl animate-in zoom-in-95 duration-200 text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]">
+            <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-4">
+              <div className="flex items-center gap-2">
+                <YoutubeIcon className="h-5 w-5 text-red-500 [html.light_&]:text-[#e11d48]" />
+                <h3 className="text-sm font-bold tracking-tight">Własny link YouTube</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCustomYtModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] transition cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCustomYouTube} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-1.5 [html.light_&]:text-[#9f1239]">
+                  Link do utworu na YouTube
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  value={customYtUrl}
+                  onChange={(e) => {
+                    setCustomYtUrl(e.target.value);
+                    if (customYtError) setCustomYtError(null);
+                  }}
+                  className="w-full rounded-xl border border-teal-900/60 bg-[#162125] px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:border-teal-400 focus:outline-none [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]"
+                />
+              </div>
+
+              <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-3 text-[11px] text-amber-200/90 [html.light_&]:bg-[#fffbeb] [html.light_&]:border-[#fde68a] [html.light_&]:text-[#92400e] leading-relaxed">
+                <span className="font-bold block mb-1">Upewnij się przed zapisem:</span>
+                Sprawdź, czy wybrany film to <b>wersja studyjna</b> utworu – bez zbędnych wstępów filmowych, dialogów, wstawek teledyskowych czy niechcianych remiksów.
+              </div>
+
+              {customYtError && (
+                <div className="rounded-xl bg-red-950/40 border border-red-800/50 p-2.5 text-xs text-red-300">
+                  {customYtError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomYtModalOpen(false)}
+                  disabled={isSavingCustomYt}
+                  className="rounded-xl px-4 py-2.5 text-xs font-semibold text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] cursor-pointer"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCustomYt || !customYtUrl.trim()}
+                  className="flex items-center gap-2 rounded-xl bg-teal-400 px-4 py-2.5 text-xs font-bold text-black hover:bg-teal-300 disabled:opacity-50 cursor-pointer [html.light_&]:bg-[#db2777] [html.light_&]:text-white shadow-lg shadow-teal-500/20"
+                >
+                  {isSavingCustomYt && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>{isSavingCustomYt ? "Zapisywanie..." : "Zapisz i odtwórz"}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

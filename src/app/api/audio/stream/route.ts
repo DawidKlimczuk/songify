@@ -33,6 +33,28 @@ const FORBIDDEN_WORDS = [
   "występ",
   "reakcja",
   "reaction",
+  "reaguje",
+  "react",
+  "shot",
+  "vlog",
+  "podcast",
+  "wywiad",
+  "interview",
+];
+
+const VARIANT_WORDS = [
+  "remix",
+  "speed up",
+  "sped up",
+  "slowed",
+  "nightcore",
+  "bass boosted",
+  "przyśpieszona",
+  "przyspieszona",
+  "zwolniona",
+  "edit",
+  "mashup",
+  "cover",
 ];
 
 export async function GET(request: NextRequest) {
@@ -67,36 +89,37 @@ export async function GET(request: NextRequest) {
     const youtube = await getInnertube();
     let videoId: string | undefined;
 
-    // Pobieramy tokeny artystów z zapytania (np. "daria", "zawiałow"), aby upewnić się, że nie bierzemy solowej wersji
-    const queryTokens = normalizedKey.split(" ").filter((w) => w.length > 3);
+    const wantsVariant = VARIANT_WORDS.some((w) => normalizedKey.includes(w));
 
-    // KROK A: Przeszukujemy klasyczne wideo YouTube (bo teledysk sanah i Darii to "video", a nie "song")
+    // KROK A: Klasyczne wideo YouTube (dokładnie jak w starym, dobrym pliku)
     try {
       const videoSearch = await youtube.search(query, { type: "video" });
       const videos = (videoSearch.videos as any[]) || [];
 
-      // Filtrujemy nagrania live
+      // Filtrujemy niechciane materiały oraz remiksy (jeśli użytkownik sam ich nie szukał)
       const cleanVideos = videos.filter((v) => {
         const title = (v.title?.text || v.title || "").toLowerCase();
-        return !FORBIDDEN_WORDS.some((word) => title.includes(word));
+
+        if (FORBIDDEN_WORDS.some((word) => title.includes(word))) {
+          return false;
+        }
+
+        if (!wantsVariant && VARIANT_WORDS.some((vw) => title.includes(vw))) {
+          return false;
+        }
+
+        return true;
       });
 
-      // Szukamy takiego, który zawiera wszystkich głównych artystów w tytule lub autorze
-      const perfectMatch = cleanVideos.find((v) => {
-        const fullText = `${v.title?.text || v.title || ""} ${v.author?.name || ""}`.toLowerCase();
-        return queryTokens.every((token) => fullText.includes(token));
-      });
-
-      if (perfectMatch) {
-        videoId = perfectMatch.id;
-      } else if (cleanVideos.length > 0) {
+      // Bierzemy pierwszy czysty film bezpośrednio z rankingu YouTube!
+      if (cleanVideos.length > 0) {
         videoId = cleanVideos[0].id;
       }
     } catch (e) {
       console.warn("Błąd wyszukiwania YouTube video:", e);
     }
 
-    // KROK B: Fallback do YouTube Music, jeśli zwykłe wideo nic nie dało
+    // KROK B: Fallback YouTube Music
     if (!videoId) {
       try {
         const musicSearch = await youtube.music.search(query, { type: "song" });
