@@ -20,16 +20,18 @@ model User {
 }
 
 model Playlist {
-  id        String         @id @default(uuid())
-  name      String
-  coverUrl  String?
-  userId    String
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  songs     PlaylistSong[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
-  description String?   @db.VarChar(300)
-  is_public   Boolean   @default(true)
+  id               String         @id @default(uuid())
+  name             String
+  coverUrl         String?
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  songs            PlaylistSong[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  description      String?        @db.VarChar(300)
+  is_public        Boolean        @default(true)
+  is_owner_deleted Boolean        @default(false)
+  originalOwnerId  String?
 }
 
 model Song {
@@ -50,4 +52,12 @@ model PlaylistSong {
   addedAt    DateTime @default(now())
 
   @@id([playlistId, songId])
+}
+
+model youtube_cache {
+  query      String   @id
+  video_id   String
+  created_at DateTime @default(now())
+
+  @@map("youtube_cache")
 }

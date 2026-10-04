@@ -22,6 +22,10 @@ import {
   ListPlus,
   Check,
   ExternalLink,
+  Globe,
+  Lock,
+  User as UserIcon,
+  Bookmark,
 } from "lucide-react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import {
@@ -33,6 +37,8 @@ import {
   bulkLikeTracks,
   clearLikedTracks,
   updateSongCover,
+  togglePlaylistVisibility,
+  reclaimPlaylist,
 } from "@/app/actions/playlist";
 
 // Ikona Spotify SVG
@@ -58,6 +64,7 @@ export default function PlaylistView() {
     isShuffle,
     toggleShuffle,
     addToQueue,
+    addMultipleToQueue,
   } = usePlayerStore();
 
   const [swipedIdx, setSwipedIdx] = useState<{
@@ -91,9 +98,59 @@ export default function PlaylistView() {
 
   // Stan formularza edycji
   const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editIsPublic, setEditIsPublic] = useState(true);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isTogglingVisibility, setIsTogglingVisibility] = useState(false);
+
+  // Sprawdzanie czy playlista jest obserwowana
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("songify_followed_playlists");
+      if (saved) {
+        const ids = JSON.parse(saved);
+        setIsFollowing(ids.includes(playlistId));
+      }
+    } catch {}
+  }, [playlistId]);
+
+  const toggleFollow = async () => {
+    // Jeśli pierwotny autor kliknie "Obserwuj" na swojej usuniętej playliście, odzyskuje prawa
+    if (playlist?.canReclaim) {
+      try {
+        const res = await reclaimPlaylist(playlistId);
+        if (res.reclaimed) {
+          setPlaylist((prev: any) => ({
+            ...prev,
+            isOwner: true,
+            canReclaim: false,
+            is_owner_deleted: false,
+          }));
+          loadData();
+          return;
+        }
+      } catch (e) {
+        console.error("Błąd odzyskiwania playlisty:", e);
+      }
+    }
+
+    // Standardowe dodawanie do obserwowanych dla innych użytkowników
+    try {
+      const saved = localStorage.getItem("songify_followed_playlists");
+      let ids: string[] = saved ? JSON.parse(saved) : [];
+      if (ids.includes(playlistId)) {
+        ids = ids.filter((id) => id !== playlistId);
+        setIsFollowing(false);
+      } else {
+        ids.push(playlistId);
+        setIsFollowing(true);
+      }
+      localStorage.setItem("songify_followed_playlists", JSON.stringify(ids));
+    } catch {}
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -104,6 +161,8 @@ export default function PlaylistView() {
         setPlaylist(data);
         if (data) {
           setEditName(data.name);
+          setEditDescription(data.description || "");
+          setEditIsPublic(data.is_public ?? true);
           setPreviewUrl(data.coverUrl || null);
         }
       })
@@ -160,12 +219,16 @@ export default function PlaylistView() {
 
       const updated = await updatePlaylist(playlistId, {
         name: editName.trim(),
+        description: editDescription.trim(),
+        is_public: editIsPublic,
         coverUrl: finalCoverUrl,
       });
 
       setPlaylist((prev: any) => ({
         ...prev,
         name: updated.name,
+        description: updated.description,
+        is_public: updated.is_public,
         coverUrl: updated.coverUrl,
       }));
 
@@ -394,6 +457,66 @@ export default function PlaylistView() {
     }
   };
 
+  // Obliczanie łącznego czasu trwania wszystkich utworów
+  const totalDurationSeconds = songsList.reduce((acc: number, song: any) => acc + (song.duration || 0), 0);
+  const formatTotalDuration = (seconds: number) => {
+    if (!seconds) return "0 min";
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    if (hrs > 0) {
+      return `${hrs} godz. ${mins} min`;
+    }
+    return `${mins} min`;
+  };
+
+  // Poprawna polska gramatyka: 1 zapis, 2-4 zapisy, 5-21 zapisów, 22-24 zapisy itd.
+  const formatFollowersCount = (count: number) => {
+    if (count === 1) return "1 zapis";
+    const abs = Math.abs(count);
+    const lastDigit = abs % 10;
+    const lastTwoDigits = abs % 100;
+    if (lastTwoDigits >= 12 && lastTwoDigits <= 14) {
+      return `${count} zapisów`;
+    }
+    if (lastDigit >= 2 && lastDigit <= 4) {
+      return `${count} zapisy`;
+    }
+    return `${count} zapisów`;
+  };
+
+  const followersCount = (playlist?.followersCount || 0) + (isFollowing ? 1 : 0);
+
+  const handleToggleVisibility = async () => {
+    if (!playlist?.isOwner || isTogglingVisibility) return;
+    setIsTogglingVisibility(true);
+    const nextVal = !playlist.is_public;
+    try {
+      await togglePlaylistVisibility(playlistId, nextVal);
+      setPlaylist((prev: any) => ({ ...prev, is_public: nextVal }));
+      setEditIsPublic(nextVal);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsTogglingVisibility(false);
+    }
+  };
+
+  const handleAddPlaylistToQueue = () => {
+    if (songsList.length === 0) return;
+
+    const formattedTracks = songsList.map((song: any) => ({
+      ...song,
+      albumCover: song.albumCover || null,
+      id: String(song.id),
+      source: playlist.name,
+    }));
+
+    addMultipleToQueue(formattedTracks);
+
+    setAddedQueueNotice(`${playlist.name} (${songsList.length} utworów)`);
+    setTimeout(() => setAddedQueueNotice(null), 2000);
+  };
+
   return (
     <div className="min-h-screen pb-36 pt-4 px-4 text-white">
       {/* Pasek Górny */}
@@ -420,11 +543,11 @@ export default function PlaylistView() {
               <span>Importuj utwory</span>
             </button>
           </div>
-        ) : (
+        ) : playlist.isOwner ? (
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setIsMenuOpen((prev) => !prev)}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-[#162125] transition border border-teal-900/30"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-[#162125] transition border border-teal-900/30 cursor-pointer"
               title="Opcje playlisty"
             >
               <MoreVertical className="h-5 w-5" />
@@ -439,9 +562,9 @@ export default function PlaylistView() {
                     setSelectedFile(null);
                     setIsEditModalOpen(true);
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-gray-200 hover:bg-[#162125] hover:text-teal-400 transition"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-gray-200 hover:bg-[#162125] hover:text-teal-400 [html.light_&]:text-[#5c0612] [html.light_&]:hover:bg-[#fff1f2] [html.light_&]:hover:text-[#db2777] transition cursor-pointer"
                 >
-                  <Edit2 className="h-4 w-4 text-teal-400" />
+                  <Edit2 className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
                   <span>Edytuj playlistę</span>
                 </button>
                 <button
@@ -449,7 +572,7 @@ export default function PlaylistView() {
                     setIsMenuOpen(false);
                     setIsDeleteModalOpen(true);
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 transition"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 [html.light_&]:text-[#e11d48] [html.light_&]:hover:bg-red-50 transition cursor-pointer"
                 >
                   <Trash2 className="h-4 w-4" />
                   <span>Usuń playlistę</span>
@@ -457,60 +580,150 @@ export default function PlaylistView() {
               </div>
             )}
           </div>
+        ) : null}
+      </div>
+
+      {/* NAGŁÓWEK PLAYLISTY (UKŁAD POZIOMY) */}
+      <div className="mb-4">
+        <div className="flex gap-4 items-center">
+          {/* Okładka / Mozaika (po lewej) */}
+          <div
+            className={`relative aspect-square w-32 sm:w-36 flex-shrink-0 rounded-2xl overflow-hidden border shadow-xl flex items-center justify-center [html.light_&]:border-[#fecdd3] ${
+              isLikedPlaylist
+                ? "bg-gradient-to-br from-teal-500/40 via-emerald-600/30 to-teal-950 border-teal-500/50 [html.light_&]:from-[#f43f5e]/20 [html.light_&]:to-[#ffe4e6]"
+                : "bg-[#0e1619] border-teal-800/40"
+            }`}
+          >
+            {playlist.coverUrl ? (
+              <img
+                src={playlist.coverUrl}
+                alt={playlist.name}
+                className="h-full w-full object-cover"
+              />
+            ) : isLikedPlaylist ? (
+              <Heart className="h-14 w-14 text-teal-400 fill-teal-400/30 [html.light_&]:text-[#be123c] [html.light_&]:fill-[#be123c]/30" />
+            ) : songsList.length > 0 ? (
+              <div className="grid grid-cols-2 grid-rows-2 h-full w-full">
+                {[0, 1, 2, 3].map((idx) => {
+                  const sCover = songsList[idx]?.albumCover;
+                  return (
+                    <div
+                      key={idx}
+                      className="relative flex h-full w-full items-center justify-center border border-teal-900/20 bg-teal-950/50 [html.light_&]:border-white/30 [html.light_&]:bg-gradient-to-br [html.light_&]:from-[#ff758c] [html.light_&]:to-[#ff7eb3] overflow-hidden"
+                    >
+                      {sCover ? (
+                        <img src={sCover} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <Music className="h-4 w-4 text-teal-400/60 drop-shadow-sm [html.light_&]:text-white/95" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Music className="h-12 w-12 text-teal-500/40 [html.light_&]:text-[#be123c]/60" />
+            )}
+          </div>
+
+          {/* Szczegóły po prawej z powiększonymi tekstami */}
+          <div className="flex flex-col justify-center flex-1 min-w-0 space-y-1.5">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white [html.light_&]:text-[#5c0612] truncate">
+                {playlist.name}
+              </h1>
+              <p className="text-xs font-bold text-teal-400 [html.light_&]:text-[#db2777] mt-0.5">
+                {songsList.length} utworów
+              </p>
+            </div>
+
+            <div className="space-y-1 text-xs text-gray-300 [html.light_&]:text-[#701a28]">
+              {/* Łączny czas trwania */}
+              <div className="leading-tight">
+                Czas trwania:{" "}
+                <span className="text-white font-semibold [html.light_&]:text-[#5c0612]">
+                  {formatTotalDuration(totalDurationSeconds)}
+                </span>
+              </div>
+
+              {/* Status Publiczna/Prywatna (bez przycisku "zmień") oraz Ilość zapisów */}
+              {!isLikedPlaylist && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 leading-tight">
+                  <span className="flex items-center gap-1 font-medium">
+                    {playlist.is_public ? (
+                      <>
+                        <Globe className="h-3.5 w-3.5 text-teal-400 [html.light_&]:text-[#db2777]" />
+                        <span>Publiczna</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="h-3.5 w-3.5 text-amber-400" />
+                        <span>Prywatna</span>
+                      </>
+                    )}
+                  </span>
+                  <span>•</span>
+                  <span className="font-semibold text-teal-300 [html.light_&]:text-[#be123c]">
+                    {formatFollowersCount(followersCount)}
+                  </span>
+                </div>
+              )}
+
+              {/* Twórca Playlisty z większym awatarem i czytelnym nickiem */}
+              <div className="flex items-center gap-2 pt-0.5">
+                <div className="h-5 w-5 rounded-full overflow-hidden bg-teal-950 border border-teal-800/60 flex items-center justify-center flex-shrink-0 [html.light_&]:border-[#fbcfe8]">
+                  {playlist.user?.avatarUrl ? (
+                    <img src={playlist.user.avatarUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <UserIcon className="h-3 w-3 text-teal-400 [html.light_&]:text-[#db2777]" />
+                  )}
+                </div>
+                <span className="truncate font-bold text-sm text-white [html.light_&]:text-[#5c0612]">
+                  {playlist.user?.username || "Klima"}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Opis playlisty na PEŁNEJ SZEROKOŚCI pod kafelkiem */}
+        {playlist.description && (
+          <div className="mt-3.5 px-1">
+            <p className="text-xs text-gray-300 [html.light_&]:text-[#881337] leading-relaxed break-words whitespace-pre-wrap">
+              {playlist.description}
+            </p>
+          </div>
         )}
       </div>
 
-      {/* Nagłówek Playlisty */}
-      <div className="flex flex-col items-center text-center mb-6">
-        <div
-          className={`relative aspect-square w-44 rounded-2xl overflow-hidden border shadow-xl mb-4 flex items-center justify-center ${
-            isLikedPlaylist
-              ? "bg-gradient-to-br from-teal-500/40 via-emerald-600/30 to-teal-950 border-teal-500/50"
-              : "bg-[#0e1619] border-teal-800/40"
-          }`}
+      {/* KONTROLKI PLAYLISTY (Play po lewej, Pobierz, Losuj, Obserwuj) */}
+      <div className="flex items-center gap-3 mb-6">
+        {/* Play/Pause */}
+        <button
+          onClick={() => handlePlayAll(false)}
+          disabled={songsList.length === 0}
+          className="flex h-13 w-13 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/20 hover:scale-105 active:scale-95 transition disabled:opacity-50 [html.light_&]:bg-[#db2777] [html.light_&]:text-white [html.light_&]:shadow-[#db2777]/30 cursor-pointer"
         >
-          {playlist.coverUrl ? (
-            <img
-              src={playlist.coverUrl}
-              alt={playlist.name}
-              className="h-full w-full object-cover"
-            />
-          ) : isLikedPlaylist ? (
-            <Heart className="h-20 w-20 text-teal-400 fill-teal-400/30" />
+          {isPlayingThisPlaylist ? (
+            <Pause className="h-6 w-6 fill-current" />
           ) : (
-            <Music className="h-16 w-16 text-teal-500/40" />
+            <Play className="h-6 w-6 fill-current ml-0.5" />
           )}
-        </div>
-        <h1 className="text-xl font-bold tracking-tight">{playlist.name}</h1>
-        <p className="text-xs text-gray-400 mt-1">{songsList.length} utworów</p>
-      </div>
+        </button>
 
-      {/* Kontrolki Playlisty */}
-      <div className="flex items-center justify-between mb-6 px-4">
+        {/* Pobierz */}
         <button
           onClick={() => alert("Pobieranie do trybu offline skonfigurujemy w punkcie PWA.")}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0e1619] border border-teal-900/40 text-teal-400 hover:text-white transition"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0e1619] border border-teal-900/40 text-teal-400 hover:text-white transition [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3] [html.light_&]:text-[#9f1239] cursor-pointer"
           title="Pobierz playlistę"
         >
           <Download className="h-5 w-5" />
         </button>
 
-        <button
-          onClick={() => handlePlayAll(false)}
-          disabled={songsList.length === 0}
-          className="flex h-14 w-14 items-center justify-center rounded-full bg-teal-400 text-black shadow-lg shadow-teal-500/20 hover:scale-105 active:scale-95 transition disabled:opacity-50"
-        >
-          {isPlayingThisPlaylist ? (
-            <Pause className="h-6 w-6 fill-black" />
-          ) : (
-            <Play className="h-6 w-6 fill-black ml-0.5" />
-          )}
-        </button>
-
+        {/* Tryb odtwarzania / losowanie */}
         <button
           onClick={() => toggleShuffle()}
           disabled={songsList.length === 0}
-          className="flex h-11 w-11 items-center justify-center rounded-full border border-teal-900/40 bg-[#0e1619] text-teal-400 hover:text-white hover:border-teal-500/50 transition active:scale-95 shadow-sm disabled:opacity-50"
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-teal-900/40 bg-[#0e1619] text-teal-400 hover:text-white hover:border-teal-500/50 transition active:scale-95 shadow-sm disabled:opacity-50 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3] [html.light_&]:text-[#9f1239] cursor-pointer"
           title={isShuffle ? "Tryb: Odtwarzanie losowe" : "Tryb: Odtwarzanie po kolei"}
         >
           {isShuffle ? (
@@ -519,6 +732,31 @@ export default function PlaylistView() {
             <ArrowRight className="h-5 w-5 stroke-[2.2]" />
           )}
         </button>
+
+        {/* Dodaj całą playlistę do kolejki */}
+        <button
+          onClick={handleAddPlaylistToQueue}
+          disabled={songsList.length === 0}
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-teal-900/40 bg-[#0e1619] text-teal-400 hover:text-white hover:border-teal-500/50 transition active:scale-95 shadow-sm disabled:opacity-50 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3] [html.light_&]:text-[#9f1239] cursor-pointer"
+          title="Dodaj całą playlistę do kolejki"
+        >
+          <ListPlus className="h-5 w-5 stroke-[2.2]" />
+        </button>
+
+        {/* Przycisk Obserwuj */}
+        {!isLikedPlaylist && !playlist.isOwner && (
+          <button
+            onClick={toggleFollow}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold transition active:scale-95 border cursor-pointer ${
+              isFollowing
+                ? "bg-teal-500 text-black border-teal-400 [html.light_&]:bg-[#db2777] [html.light_&]:text-white"
+                : "bg-[#0e1619] text-gray-300 border-teal-900/40 hover:text-white hover:border-teal-400 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3] [html.light_&]:text-[#881337]"
+            }`}
+          >
+            <Bookmark className={`h-3.5 w-3.5 ${isFollowing ? "fill-current" : ""}`} />
+            <span>{isFollowing ? "Obserwujesz" : "Obserwuj"}</span>
+          </button>
+        )}
       </div>
 
       {/* Pływające powiadomienie o dodaniu do kolejki */}
@@ -812,6 +1050,48 @@ export default function PlaylistView() {
                   onChange={(e) => setEditName(e.target.value)}
                   className="w-full rounded-xl border border-teal-900/50 bg-[#162125] px-3.5 py-2.5 text-xs text-white placeholder-gray-500 focus:border-teal-400 focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-medium text-gray-400 mb-1 block">
+                  Opis playlisty
+                </label>
+                <textarea
+                  rows={2}
+                  maxLength={300}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Dodaj opcjonalny opis..."
+                  className="w-full rounded-xl border border-teal-900/50 bg-[#162125] p-3 text-xs text-white placeholder-gray-500 focus:border-teal-400 focus:outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3]">
+                <div className="flex items-center gap-2">
+                  {editIsPublic ? (
+                    <Globe className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                  ) : (
+                    <Lock className="h-4 w-4 text-gray-400 [html.light_&]:text-[#9f1239]" />
+                  )}
+                  <span className="text-xs font-semibold text-white [html.light_&]:text-[#5c0612]">
+                    {editIsPublic ? "Publiczna" : "Prywatna"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditIsPublic(!editIsPublic)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                    editIsPublic
+                      ? "bg-teal-400 [html.light_&]:bg-[#db2777]"
+                      : "bg-gray-700 [html.light_&]:bg-gray-300"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black [html.light_&]:bg-white transition-transform ${
+                      editIsPublic ? "translate-x-4.5" : "translate-x-1"
+                    }`}
+                  />
+                </button>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

@@ -26,11 +26,11 @@ export default function MiniPlayer() {
   // Pobranie stanu polubienia z bazy danych
   useEffect(() => {
     if (currentTrack?.id) {
-      isTrackLiked(currentTrack.id).then((liked) => {
+      isTrackLiked(currentTrack.id, currentTrack.title, currentTrack.artist).then((liked) => {
         setIsLiked(liked);
       });
     }
-  }, [currentTrack?.id, setIsLiked]);
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, setIsLiked]);
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();

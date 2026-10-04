@@ -35,6 +35,7 @@ interface PlayerState {
   removeFromQueue: (index: number) => void;
   playNextInQueue: (index: number) => void;
   addToQueue: (track: Track) => void;
+  addMultipleToQueue: (tracks: Track[]) => void;
   nextTrack: () => Promise<void>;
   previousTrack: () => void;
   togglePlay: () => void;
@@ -50,7 +51,7 @@ interface PlayerState {
   seekTo: (seconds: number) => void;
   resetSeek: () => void;
   setAddToPlaylistOpen: (open: boolean) => void;
-
+  
   // Sleep Timer
   sleepTimerEndsAt: number | null;
   sleepTimerMode: "time" | "end_of_track" | null;
@@ -187,6 +188,32 @@ export const usePlayerStore = create<PlayerState>()(
         sendConnectCommand({
           type: "SYNC_QUEUE",
           queue: baseQueue,
+          originalQueue: newOriginal,
+        });
+      },
+
+      addMultipleToQueue: (tracks) => {
+        if (!tracks || tracks.length === 0) return;
+        const { queue, originalQueue, currentTrack } = get();
+        const formattedTracks = tracks.map((t) => ({ ...t, id: String(t.id) }));
+
+        let baseQueue = [...queue];
+        if (baseQueue.length === 0 && currentTrack) {
+          baseQueue = [{ ...currentTrack, id: String(currentTrack.id) }];
+        }
+
+        // Dodaje całą playlistę hurtowo na koniec kolejki
+        const newQueue = [...baseQueue, ...formattedTracks];
+        const newOriginal = [...originalQueue, ...formattedTracks];
+
+        set({
+          queue: newQueue,
+          originalQueue: newOriginal,
+        });
+
+        sendConnectCommand({
+          type: "SYNC_QUEUE",
+          queue: newQueue,
           originalQueue: newOriginal,
         });
       },

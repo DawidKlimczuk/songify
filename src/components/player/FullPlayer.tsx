@@ -276,11 +276,11 @@ export default function FullPlayer() {
 
   useEffect(() => {
     if (currentTrack?.id) {
-      isTrackLiked(currentTrack.id).then((liked) => {
+      isTrackLiked(currentTrack.id, currentTrack.title, currentTrack.artist).then((liked) => {
         setIsLiked(liked);
       });
     }
-  }, [currentTrack?.id, setIsLiked]);
+  }, [currentTrack?.id, currentTrack?.title, currentTrack?.artist, setIsLiked]);
 
   const handleLikeClick = async () => {
     if (!currentTrack) return;
@@ -967,19 +967,7 @@ export default function FullPlayer() {
                               {relativeIdx + 1}
                             </span>
 
-                            <div className="relative h-10 w-10 rounded-lg overflow-hidden flex-shrink-0 bg-[#162125] border border-teal-950/50">
-                              {track.albumCover ? (
-                                <img
-                                  src={track.albumCover}
-                                  alt={track.title}
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                <div className="h-full w-full flex items-center justify-center">
-                                  <Music2 className="h-4 w-4 text-teal-400/50" />
-                                </div>
-                              )}
-                            </div>
+                            <QueueTrackCover track={track} />
 
                             <div className="flex flex-col truncate">
                               <span className="truncate text-xs font-semibold text-white">
@@ -1429,6 +1417,55 @@ export default function FullPlayer() {
 
       {/* Modal wyboru urządzenia (Songify Connect) */}
       <DevicePickerModal />
+    </div>
+  );
+}
+
+// Podkomponent okładki w kolejce z automatycznym dociąganiem brakujących grafik
+function QueueTrackCover({ track }: { track: any }) {
+  const [cover, setCover] = useState<string>(track.albumCover || "");
+
+  useEffect(() => {
+    if (cover || !track) return;
+
+    let isMounted = true;
+    const cleanTitle = (track.title || "")
+      .replace(/\(.*?\)/g, "")
+      .replace(/\[.*?\]/g, "")
+      .replace(/feat\..*$/gi, "")
+      .replace(/ft\..*$/gi, "")
+      .trim();
+    const cleanArtist = (track.artist || "").split(/[,;&/]/)[0].trim();
+
+    fetch(`/api/deezer/cover?title=${encodeURIComponent(cleanTitle)}&artist=${encodeURIComponent(cleanArtist)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (isMounted && data?.cover) {
+          setCover(data.cover);
+          track.albumCover = data.cover;
+          updateSongCover(track.id, data.cover).catch(() => {});
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [track?.id, cover, track]);
+
+  return (
+    <div className="relative h-10 w-10 rounded-lg overflow-hidden flex-shrink-0 bg-[#162125] border border-teal-950/50 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]">
+      {cover ? (
+        <img
+          src={cover}
+          alt={track.title}
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <div className="h-full w-full flex items-center justify-center">
+          <Music2 className="h-4 w-4 text-teal-400/50 [html.light_&]:text-[#db2777]" />
+        </div>
+      )}
     </div>
   );
 }

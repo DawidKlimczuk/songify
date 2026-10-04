@@ -7,6 +7,7 @@ import {
   getUserPlaylists,
   addSongToPlaylist,
   removeSongFromPlaylist,
+  getPlaylistsContainingSong,
 } from "@/app/actions/playlist";
 
 export default function AddToPlaylistModal() {
@@ -23,30 +24,29 @@ export default function AddToPlaylistModal() {
     if (isAddToPlaylistOpen && currentTrack) {
       setLoading(true);
 
-      getUserPlaylists()
-        .then((data) => {
-          const filtered = (data || []).filter(
+      Promise.all([
+        getUserPlaylists(),
+        getPlaylistsContainingSong({
+          id: currentTrack.id,
+          title: currentTrack.title,
+          artist: currentTrack.artist || "",
+        }),
+      ])
+        .then(([allPlaylists, alreadyInIds]) => {
+          const filtered = (allPlaylists || []).filter(
             (p: any) =>
               p.name !== "Polubione utwory" &&
               p.name !== "Liked Songs" &&
               !p.isLiked
           );
           setPlaylists(filtered);
-
-          // Identyfikacja playlist, na których ten utwór już jest zapisany
-          const trackIdStr = String(currentTrack.id);
-          const alreadyInIds = filtered
-            .filter((p: any) =>
-              p.songs?.some((s: any) => String(s.songId) === trackIdStr)
-            )
-            .map((p: any) => p.id);
-
           setInitialSelectedIds(alreadyInIds);
           setSelectedIds(alreadyInIds);
         })
+        .catch((err) => console.error("Błąd wczytywania playlist dla utworu:", err))
         .finally(() => setLoading(false));
     }
-  }, [isAddToPlaylistOpen, currentTrack?.id]);
+  }, [isAddToPlaylistOpen, currentTrack?.id, currentTrack?.title]);
 
   if (!isAddToPlaylistOpen || !currentTrack) return null;
 

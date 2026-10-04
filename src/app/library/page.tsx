@@ -18,6 +18,7 @@ import {
   Loader2,
   ExternalLink,
   Check,
+  Pin,
 } from "lucide-react";
 import {
   createPlaylist,
@@ -42,6 +43,36 @@ export default function LibraryPage() {
   // Stany dla modali
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const [isCreatingModalOpen, setIsCreatingModalOpen] = useState(false);
+
+  // Stany dla przypinania playlist (max 5)
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("songify_pinned_playlist_ids");
+      if (saved) {
+        setPinnedIds(JSON.parse(saved));
+      }
+    } catch {}
+  }, []);
+
+  const togglePinPlaylist = (id: string) => {
+    let next: string[];
+    if (pinnedIds.includes(id)) {
+      next = pinnedIds.filter((pId) => pId !== id);
+    } else {
+      if (pinnedIds.length >= 5) {
+        alert("Możesz przypiąć maksymalnie 5 playlist.");
+        return;
+      }
+      next = [...pinnedIds, id];
+    }
+    setPinnedIds(next);
+    try {
+      localStorage.setItem("songify_pinned_playlist_ids", JSON.stringify(next));
+    } catch {}
+  };
 
   // Formularz nowej playlisty
   const [playlistName, setPlaylistName] = useState("");
@@ -312,7 +343,20 @@ export default function LibraryPage() {
     }
   };
 
-  const filteredPlaylists = playlists.filter((p) =>
+  const sortedPlaylists = [...playlists].sort((a, b) => {
+    if (a.name === "Polubione utwory") return -1;
+    if (b.name === "Polubione utwory") return 1;
+
+    const aPinned = pinnedIds.includes(a.id);
+    const bPinned = pinnedIds.includes(b.id);
+
+    if (aPinned && !bPinned) return -1;
+    if (!aPinned && bPinned) return 1;
+
+    return 0;
+  });
+
+  const filteredPlaylists = sortedPlaylists.filter((p) =>
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -323,13 +367,27 @@ export default function LibraryPage() {
       {/* Pasek Górny */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold tracking-tight text-white">Twoja Biblioteka</h1>
-        <button
-          onClick={() => setIsPlusMenuOpen(true)}
-          className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30 transition active:scale-95 shadow-sm hover:bg-teal-500 hover:text-black [html.light_&]:bg-[#f472b6] [html.light_&]:text-white [html.light_&]:border-[#f472b6] [html.light_&]:shadow-[#f472b6]/30 [html.light_&]:hover:bg-[#db2777] cursor-pointer"
-          title="Dodaj"
-        >
-          <Plus className="h-5 w-5 stroke-[2.5]" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsPinModalOpen(true)}
+            className={`flex h-9 w-9 items-center justify-center rounded-full border transition active:scale-95 shadow-sm cursor-pointer ${
+              pinnedIds.length > 0
+                ? "bg-teal-400 text-black border-teal-400 [html.light_&]:!bg-[#db2777] [html.light_&]:!text-white [html.light_&]:!border-[#db2777] shadow-teal-500/20 [html.light_&]:shadow-[#db2777]/30"
+                : "bg-teal-500/10 text-teal-400 border-teal-500/30 hover:bg-teal-500 hover:text-black [html.light_&]:!bg-[#f472b6] [html.light_&]:!text-white [html.light_&]:!border-[#f472b6] [html.light_&]:shadow-[#f472b6]/30 [html.light_&]:hover:!bg-[#db2777]"
+            }`}
+            title="Zarządzaj przypiętymi playlistami"
+          >
+            <Pin className="h-4 w-4 fill-current rotate-45" />
+          </button>
+
+          <button
+            onClick={() => setIsPlusMenuOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-500/10 text-teal-400 border border-teal-500/30 transition active:scale-95 shadow-sm hover:bg-teal-500 hover:text-black [html.light_&]:bg-[#f472b6] [html.light_&]:text-white [html.light_&]:border-[#f472b6] [html.light_&]:shadow-[#f472b6]/30 [html.light_&]:hover:bg-[#db2777] cursor-pointer"
+            title="Dodaj"
+          >
+            <Plus className="h-5 w-5 stroke-[2.5]" />
+          </button>
+        </div>
       </div>
 
       {/* Zakładki */}
@@ -367,18 +425,19 @@ export default function LibraryPage() {
             <div className="py-16 text-center text-xs text-teal-400">Ładowanie playlist...</div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col space-y-1.5">
                 {filteredPlaylists.map((item) => {
                   const isLiked = item.name === "Polubione utwory";
+                  const isPinned = pinnedIds.includes(item.id);
                   const songs = item.songs || [];
 
                   return (
                     <Link
                       key={item.id}
                       href={`/library/playlist/${item.id}`}
-                      className="flex flex-col rounded-xl bg-[#0e1619] border border-teal-950/60 p-3 transition active:scale-95 hover:border-teal-800/60 [html.light_&]:bg-white [html.light_&]:border-[#fce7f3]"
+                      className="flex items-center gap-3.5 rounded-xl p-2 transition active:scale-[0.99] hover:bg-white/5 [html.light_&]:hover:bg-[#fff1f2]/70 cursor-pointer"
                     >
-                      <div className="aspect-square w-full rounded-lg overflow-hidden bg-teal-950/30 border border-teal-900/30 flex items-center justify-center mb-2 [html.light_&]:border-[#fecdd3] relative">
+                      <div className="relative h-14 w-14 flex-shrink-0 rounded-lg overflow-hidden bg-teal-950/30 border border-teal-900/30 flex items-center justify-center [html.light_&]:border-[#fecdd3]">
                         {item.coverUrl ? (
                           <img
                             src={item.coverUrl}
@@ -387,7 +446,7 @@ export default function LibraryPage() {
                           />
                         ) : isLiked ? (
                           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-teal-500/30 to-emerald-950 [html.light_&]:from-[#f43f5e]/20 [html.light_&]:to-[#ffe4e6]">
-                            <Heart className="h-8 w-8 text-teal-400 fill-teal-400/30 [html.light_&]:text-[#be123c] [html.light_&]:fill-[#be123c]/30" />
+                            <Heart className="h-6 w-6 text-teal-400 fill-teal-400/30 [html.light_&]:text-[#be123c] [html.light_&]:fill-[#be123c]/30" />
                           </div>
                         ) : songs.length > 0 ? (
                           <div className="grid grid-cols-2 grid-rows-2 h-full w-full">
@@ -405,24 +464,39 @@ export default function LibraryPage() {
                                       className="h-full w-full object-cover"
                                     />
                                   ) : (
-                                    <Music className="h-5 w-5 text-teal-400/60 drop-shadow-sm [html.light_&]:text-white/95" />
+                                    <Music className="h-3.5 w-3.5 text-teal-400/60 drop-shadow-sm [html.light_&]:text-white/95" />
                                   )}
                                 </div>
                               );
                             })}
                           </div>
                         ) : (
-                          <Music className="h-8 w-8 text-teal-400/60 [html.light_&]:text-[#be123c]/60" />
+                          <Music className="h-6 w-6 text-teal-400/60 [html.light_&]:text-[#be123c]/60" />
                         )}
                       </div>
-                      <span className="truncate text-xs font-semibold text-white [html.light_&]:text-[#5c0612]">
-                        {item.name}
-                      </span>
-                      <span className="text-[10px] text-gray-400 [html.light_&]:text-[#9f1239]">
-                        {item.is_public === false || item.isPublic === false
-                          ? "Prywatna playlista"
-                          : "Playlista"}
-                      </span>
+
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="truncate text-sm font-bold text-white tracking-tight [html.light_&]:text-[#5c0612]">
+                          {item.name}
+                        </span>
+
+                        <div className="flex items-center gap-1.5 text-xs text-gray-400 [html.light_&]:text-[#9f1239] mt-0.5">
+                          {isPinned && (
+                            <span className="inline-flex items-center text-teal-400 [html.light_&]:text-[#1DB954]" title="Przypięte">
+                              <Pin className="h-3 w-3 fill-current rotate-45 mr-0.5" />
+                            </span>
+                          )}
+                          <span>
+                            {item.is_public === false || item.isPublic === false
+                              ? "Prywatna playlista"
+                              : "Playlista"}
+                          </span>
+                          <span>•</span>
+                          <span className="truncate">
+                            {item._count?.songs !== undefined ? `${item._count.songs} utworów` : "Klima"}
+                          </span>
+                        </div>
+                      </div>
                     </Link>
                   );
                 })}
@@ -1010,6 +1084,69 @@ export default function LibraryPage() {
           </div>
         </div>
       )}
+      {/* MODAL: ZARZĄDZANIE PRZYPIĘTYMI PLAYLISTAMI (MAX 5) */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]">
+            <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-4">
+              <div className="flex items-center gap-2">
+                <Pin className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777] rotate-45 fill-current" />
+                <h3 className="text-sm font-bold tracking-tight">Przypnij playlisty</h3>
+              </div>
+              <span className="text-[11px] font-semibold text-teal-400 bg-teal-950/60 px-2 py-0.5 rounded-full border border-teal-900/50 [html.light_&]:bg-[#fff1f2] [html.light_&]:text-[#db2777] [html.light_&]:border-[#fecdd3]">
+                {pinnedIds.length}/5
+              </span>
+            </div>
+
+            <p className="text-[11px] text-gray-300 [html.light_&]:text-[#881337] mb-3 leading-relaxed">
+              Zaznacz do 5 playlist, które mają być zawsze widoczne na samej górze biblioteki (zaraz pod Polubionymi utworami).
+            </p>
+
+            <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 [&::-webkit-scrollbar]:hidden">
+              {playlists
+                .filter((p) => p.name !== "Polubione utwory")
+                .map((p) => {
+                  const isSelected = pinnedIds.includes(p.id);
+
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => togglePinPlaylist(p.id)}
+                      className={`flex w-full items-center justify-between p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                        isSelected
+                          ? "bg-teal-950/50 border-teal-400 text-teal-300 [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#db2777] [html.light_&]:text-[#be123c]"
+                          : "bg-[#121c20] border-teal-950/60 text-gray-300 hover:text-white [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3] [html.light_&]:text-[#5c0612]"
+                      }`}
+                    >
+                      <span className="truncate pr-2">{p.name}</span>
+                      <div
+                        className={`h-5 w-5 rounded-md flex items-center justify-center border transition-colors flex-shrink-0 ${
+                          isSelected
+                            ? "bg-teal-400 border-teal-400 text-black [html.light_&]:bg-[#db2777] [html.light_&]:border-[#db2777] [html.light_&]:text-white"
+                            : "border-gray-600 bg-transparent"
+                        }`}
+                      >
+                        {isSelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
+                      </div>
+                    </button>
+                  );
+                })}
+            </div>
+
+            <div className="flex justify-end pt-4">
+              <button
+                type="button"
+                onClick={() => setIsPinModalOpen(false)}
+                className="rounded-xl bg-teal-400 px-5 py-2.5 text-xs font-bold text-black shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition cursor-pointer [html.light_&]:bg-[#db2777] [html.light_&]:text-white"
+              >
+                Gotowe
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -42,7 +42,10 @@ export async function getUserPlaylists() {
   await getOrCreateLikedPlaylist();
 
   const playlists = await prisma.playlist.findMany({
-    where: { userId: user.id },
+    where: { 
+      userId: user.id,
+      is_owner_deleted: false,
+    },
     include: {
       _count: {
         select: { songs: true },
@@ -92,7 +95,8 @@ export async function toggleLikeTrack(track: {
   const likedPlaylist = await getOrCreateLikedPlaylist();
   const songIdStr = String(track.id);
 
-  const existing = await prisma.playlistSong.findUnique({
+  // 1. Sprawdzamy czy piosenka jest w Polubionych po ścisłym ID
+  let existing = await prisma.playlistSong.findUnique({
     where: {
       playlistId_songId: {
         playlistId: likedPlaylist.id,
@@ -101,12 +105,57 @@ export async function toggleLikeTrack(track: {
     },
   });
 
+  // 2. Jeśli nie ma po ID, sprawdzamy po tytule i artyście (dla zaimportowanych ze Spotify)
+  if (!existing && track.title && track.artist) {
+    const cleanTitle = track.title
+      .toLowerCase()
+      .replace(/\(.*?\)/g, "")
+      .replace(/\[.*?\]/g, "")
+      .trim();
+    const cleanArtist = track.artist.split(/[,;&/]/)[0].trim().toLowerCase();
+
+    const likedSongs = await prisma.playlistSong.findMany({
+      where: { playlistId: likedPlaylist.id },
+      include: {
+        song: {
+          select: {
+            id: true,
+            title: true,
+            artist: true,
+          },
+        },
+      },
+    });
+
+    const match = likedSongs.find((item) => {
+      if (!item.song?.title) return false;
+      const sTitle = item.song.title
+        .toLowerCase()
+        .replace(/\(.*?\)/g, "")
+        .replace(/\[.*?\]/g, "")
+        .trim();
+      const sArtist = (item.song.artist || "").split(/[,;&/]/)[0].trim().toLowerCase();
+
+      return (
+        (sTitle === cleanTitle || sTitle.includes(cleanTitle) || cleanTitle.includes(sTitle)) &&
+        sArtist &&
+        cleanArtist &&
+        (sArtist.includes(cleanArtist) || cleanArtist.includes(sArtist))
+      );
+    });
+
+    if (match) {
+      existing = match;
+    }
+  }
+
+  // Jeśli utwór jest już polubiony -> usuwamy powiązanie
   if (existing) {
     await prisma.playlistSong.delete({
       where: {
         playlistId_songId: {
           playlistId: likedPlaylist.id,
-          songId: songIdStr,
+          songId: existing.songId,
         },
       },
     });
@@ -114,6 +163,7 @@ export async function toggleLikeTrack(track: {
     revalidatePath(`/library/playlist/${likedPlaylist.id}`);
     return { liked: false };
   } else {
+    // Jeśli nie ma -> dodajemy do bazy i przypisujemy do Polubionych
     await prisma.song.upsert({
       where: { id: songIdStr },
       update: {},
@@ -121,7 +171,7 @@ export async function toggleLikeTrack(track: {
         id: songIdStr,
         title: track.title,
         artist: track.artist,
-        albumCover: track.albumCover,
+        albumCover: track.albumCover || "",
         duration: track.duration ? Math.round(track.duration) : null,
       },
     });
@@ -139,24 +189,69 @@ export async function toggleLikeTrack(track: {
   }
 }
 
-export async function isTrackLiked(trackId: string | number) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return false;
+export async function isTrackLiked(
+  trackId: string | number,
+  title?: string,
+  artist?: string
+) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  const likedPlaylist = await prisma.playlist.findFirst({
-    where: { userId: user.id, name: LIKED_PLAYLIST_NAME },
-  });
+    if (!user) return false;
 
-  if (!likedPlaylist) return false;
+    const likedPlaylist = await prisma.playlist.findFirst({
+      where: { userId: user.id, name: LIKED_PLAYLIST_NAME },
+      select: { id: true },
+    });
 
-  const count = await prisma.playlistSong.count({
-    where: { playlistId: likedPlaylist.id, songId: String(trackId) },
-  });
+    if (!likedPlaylist) return false;
 
-  return count > 0;
+    const trackIdStr = String(trackId).replace("spotify:track:", "").trim();
+
+    // 1. Szybkie sprawdzenie bezpośrednio po ID (indeksowane, ~2ms)
+    const directMatch = await prisma.playlistSong.findFirst({
+      where: {
+        playlistId: likedPlaylist.id,
+        songId: trackIdStr,
+      },
+      select: { songId: true },
+    });
+
+    if (directMatch) return true;
+
+    // 2. Jeśli nie ma po ID i podano tytuł -> niech PostgreSQL sam dopasuje tytuł bez pobierania 612 rekordów
+    if (title) {
+      const cleanTitle = title
+        .replace(/\(.*?\)/g, "")
+        .replace(/\[.*?\]/g, "")
+        .replace(/feat\..*$/gi, "")
+        .replace(/ft\..*$/gi, "")
+        .trim();
+
+      const songMatch = await prisma.playlistSong.findFirst({
+        where: {
+          playlistId: likedPlaylist.id,
+          song: {
+            title: {
+              contains: cleanTitle,
+              mode: "insensitive", // Ignoruje małe/wielkie litery po stronie bazy
+            },
+          },
+        },
+        select: { songId: true },
+      });
+
+      if (songMatch) return true;
+    }
+
+    return false;
+  } catch (err) {
+    console.error("[isTrackLiked] Błąd:", err);
+    return false;
+  }
 }
 
 export async function createPlaylist(input?: {
@@ -194,12 +289,12 @@ export async function createPlaylist(input?: {
     data: {
       name: finalName,
       userId: user.id,
+      originalOwnerId: user.id,
+      is_owner_deleted: false,
       coverUrl: coverUrlVal,
-      ...({
-        description: finalDescription,
-        is_public: isPublicVal,
-      } as any),
-    } as any,
+      description: finalDescription,
+      is_public: isPublicVal,
+    },
   });
 
   revalidatePath("/library");
@@ -213,9 +308,16 @@ export async function getPlaylistDetails(playlistId: string) {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Brak autoryzacji");
 
-  return prisma.playlist.findUnique({
-    where: { id: playlistId, userId: user.id },
+  const playlist = await prisma.playlist.findUnique({
+    where: { id: playlistId },
     include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          avatarUrl: true,
+        },
+      },
       songs: {
         include: {
           song: true,
@@ -226,11 +328,45 @@ export async function getPlaylistDetails(playlistId: string) {
       },
     },
   });
+
+  if (!playlist) return null;
+
+  const isOwnerDeleted = Boolean(playlist.is_owner_deleted);
+
+  // Zabezpieczenie: playlista prywatna dostępna tylko dla twórcy, jeśli nie została usunięta
+  if (!playlist.is_public && (playlist.userId !== user.id || isOwnerDeleted) && playlist.name !== LIKED_PLAYLIST_NAME) {
+    throw new Error("Ta playlista jest prywatna.");
+  }
+
+  // Właścicielem jest user tylko wtedy, gdy nie oznaczył jej jako usuniętą
+  const isOwner = playlist.userId === user.id && !isOwnerDeleted;
+
+  // Możliwość odzyskania praw: user jest pierwotnym twórcą i playlista ma status usuniętej
+  const canReclaim = (playlist.originalOwnerId === user.id || playlist.userId === user.id) && isOwnerDeleted;
+
+  // Jeśli twórca usunął playlistę, maskujemy nick na "Użytkownik Songify", zachowując awatar
+  const displayUser = {
+    ...playlist.user,
+    username: isOwnerDeleted ? "Użytkownik Songify" : (playlist.user?.username || "Użytkownik Songify"),
+  };
+
+  return {
+    ...playlist,
+    user: displayUser,
+    currentUserId: user.id,
+    isOwner,
+    canReclaim,
+  };
 }
 
 export async function updatePlaylist(
   playlistId: string,
-  data: { name: string; coverUrl?: string | null }
+  data: {
+    name: string;
+    description?: string | null;
+    coverUrl?: string | null;
+    is_public?: boolean;
+  }
 ) {
   const supabase = await createClient();
   const {
@@ -239,16 +375,43 @@ export async function updatePlaylist(
   if (!user) throw new Error("Brak autoryzacji");
 
   const target = await prisma.playlist.findUnique({ where: { id: playlistId } });
-  if (target?.name === LIKED_PLAYLIST_NAME) {
+  if (!target || target.userId !== user.id) {
+    throw new Error("Brak uprawnień do edycji tej playlisty");
+  }
+  if (target.name === LIKED_PLAYLIST_NAME) {
     throw new Error("Nie można modyfikować playlisty Polubione utwory");
   }
 
   const updated = await prisma.playlist.update({
-    where: { id: playlistId, userId: user.id },
+    where: { id: playlistId },
     data: {
       name: data.name,
+      description: data.description !== undefined ? data.description : undefined,
       coverUrl: data.coverUrl !== undefined ? data.coverUrl : undefined,
+      is_public: data.is_public !== undefined ? data.is_public : undefined,
     },
+  });
+
+  revalidatePath(`/library/playlist/${playlistId}`);
+  revalidatePath("/library");
+  return updated;
+}
+
+export async function togglePlaylistVisibility(playlistId: string, isPublic: boolean) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Brak autoryzacji");
+
+  const target = await prisma.playlist.findUnique({ where: { id: playlistId } });
+  if (!target || target.userId !== user.id) {
+    throw new Error("Tylko właściciel może zmieniać widoczność playlisty");
+  }
+
+  const updated = await prisma.playlist.update({
+    where: { id: playlistId },
+    data: { is_public: isPublic },
   });
 
   revalidatePath(`/library/playlist/${playlistId}`);
@@ -313,15 +476,26 @@ export async function deletePlaylist(playlistId: string) {
   if (!user) throw new Error("Brak autoryzacji");
 
   const target = await prisma.playlist.findUnique({ where: { id: playlistId } });
-  if (target?.name === LIKED_PLAYLIST_NAME) {
+  if (!target || target.userId !== user.id) {
+    throw new Error("Brak uprawnień do usunięcia tej playlisty");
+  }
+  if (target.name === LIKED_PLAYLIST_NAME) {
     throw new Error("Nie można usunąć playlisty Polubione utwory");
   }
 
-  await prisma.playlist.delete({
-    where: { id: playlistId, userId: user.id },
+  // Soft delete: utwory (Song) i okładki zostają nietknięte w bazie.
+  // Jeśli playlista była publiczna, pozostaje w wyszukiwarce jako "Użytkownik Songify".
+  await prisma.playlist.update({
+    where: { id: playlistId },
+    data: {
+      is_owner_deleted: true,
+      originalOwnerId: target.originalOwnerId || user.id,
+      is_public: target.is_public ? true : false,
+    },
   });
 
   revalidatePath("/library");
+  revalidatePath(`/library/playlist/${playlistId}`);
   return { success: true };
 }
 
@@ -603,12 +777,12 @@ export async function importPlaylistFromTracks(params: {
     data: {
       name: finalName,
       userId: user.id,
+      originalOwnerId: user.id,
+      is_owner_deleted: false,
       coverUrl: coverUrlVal,
-      ...({
-        description: finalDescription,
-        is_public: isPublicVal,
-      } as any),
-    } as any,
+      description: finalDescription,
+      is_public: isPublicVal,
+    },
   });
 
   // 2. Jeśli są utwory, wstawiamy je paczkami po 100
@@ -697,4 +871,92 @@ export async function overrideYouTubeTrack(title: string, artist: string, videoI
   }
 
   return { success: true };
+}
+
+export async function getPlaylistsContainingSong(track: {
+  id: string | number;
+  title: string;
+  artist: string;
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const trackIdStr = String(track.id);
+  const cleanTitle = (track.title || "").trim().toLowerCase();
+  const cleanArtist = (track.artist || "").split(/[,;&/]/)[0].trim().toLowerCase();
+
+  const userPlaylistSongs = await prisma.playlistSong.findMany({
+    where: {
+      playlist: {
+        userId: user.id,
+        name: { not: LIKED_PLAYLIST_NAME },
+      },
+    },
+    select: {
+      playlistId: true,
+      songId: true,
+      song: {
+        select: {
+          title: true,
+          artist: true,
+        },
+      },
+    },
+  });
+
+  const matchingPlaylistIds = new Set<string>();
+
+  for (const item of userPlaylistSongs) {
+    // 1. Zgodność po ID
+    if (String(item.songId) === trackIdStr) {
+      matchingPlaylistIds.add(item.playlistId);
+      continue;
+    }
+
+    // 2. Zgodność po tytule i artyście (dla utworów ze Spotify / wyszukiwarki)
+    if (item.song?.title) {
+      const sTitle = item.song.title.trim().toLowerCase();
+      const sArtist = (item.song.artist || "").split(/[,;&/]/)[0].trim().toLowerCase();
+
+      const sameTitle = sTitle === cleanTitle || sTitle.includes(cleanTitle) || cleanTitle.includes(sTitle);
+      const sameArtist = sArtist && cleanArtist && (sArtist.includes(cleanArtist) || cleanArtist.includes(sArtist));
+
+      if (sameTitle && sameArtist) {
+        matchingPlaylistIds.add(item.playlistId);
+      }
+    }
+  }
+
+  return Array.from(matchingPlaylistIds);
+}
+
+export async function reclaimPlaylist(playlistId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Brak autoryzacji");
+
+  const target = await prisma.playlist.findUnique({ where: { id: playlistId } });
+  if (!target) throw new Error("Playlista nie istnieje");
+
+  // Tylko pierwotny twórca może odzyskać prawa właściciela
+  if (target.originalOwnerId !== user.id && target.userId !== user.id) {
+    return { reclaimed: false };
+  }
+
+  const updated = await prisma.playlist.update({
+    where: { id: playlistId },
+    data: {
+      userId: user.id,
+      is_owner_deleted: false,
+    },
+  });
+
+  revalidatePath("/library");
+  revalidatePath(`/library/playlist/${playlistId}`);
+  return { reclaimed: true, playlist: updated };
 }
