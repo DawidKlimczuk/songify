@@ -15,14 +15,12 @@ import {
   SkipForward,
   Trash2,
   GripVertical,
-  Volume2,
   Sparkles,
   RefreshCw,
   Plus,
-  Loader2,
-  Music2,
   Radio,
   SlidersHorizontal,
+  Music2,
 } from "lucide-react";
 
 // Generator 6-znakowego kodu bez 0, O, 1, I
@@ -34,8 +32,6 @@ function generateJamCode(): string {
   }
   return code;
 }
-
-let jamRealtimeChannel: any = null;
 
 function JamJarIcon({ className = "h-5 w-5" }: { className?: string }) {
   return (
@@ -57,6 +53,86 @@ function JamJarIcon({ className = "h-5 w-5" }: { className?: string }) {
   );
 }
 
+function getAvatarBgColor(name: string) {
+  const colors = [
+    "bg-emerald-600 text-white",
+    "bg-indigo-600 text-white",
+    "bg-rose-600 text-white",
+    "bg-amber-600 text-white",
+    "bg-sky-600 text-white",
+    "bg-purple-600 text-white",
+    "bg-teal-600 text-white",
+  ];
+  let hash = 0;
+  for (let i = 0; i < (name || "").length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+// Globalny kanał do emitowania zdarzeń
+let activeJamChannel: any = null;
+
+export async function addTrackToJamSession(track: any) {
+  const jamState = useJamStore.getState();
+  if (!jamState.jamCode) return false;
+
+  const supabase = createClient();
+  let addedBy: any = undefined;
+
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from("User")
+        .select("id, username, avatarUrl")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const resolvedUsername =
+        profile?.username ||
+        user.user_metadata?.username ||
+        user.user_metadata?.full_name ||
+        user.email?.split("@")[0] ||
+        "Uczestnik";
+
+      addedBy = {
+        id: user.id,
+        username: resolvedUsername,
+        avatarUrl: profile?.avatarUrl || user.user_metadata?.avatar_url || null,
+      };
+    }
+  } catch {}
+
+  const newJamTrack: JamTrack = {
+    id: String(track.id),
+    title: track.title,
+    artist: track.artist,
+    albumCover: track.albumCover,
+    duration: track.duration,
+    addedBy,
+  };
+
+  jamState.addToJamQueue(newJamTrack);
+
+  if (jamState.isHost) {
+    usePlayerStore.getState().addToQueue(newJamTrack);
+  }
+
+  // Rozgłaszamy przez aktywny kanał lub tworzymy natychmiastowy broadcast
+  const channel = activeJamChannel || supabase.channel(`songify_jam_${jamState.jamCode}`);
+  channel.send({
+    type: "broadcast",
+    event: "JAM_COMMAND",
+    payload: {
+      type: "ADD_TO_QUEUE",
+      track: newJamTrack,
+    },
+  });
+
+  return true;
+}
+
 export default function JamModal() {
   const supabase = createClient();
   const {
@@ -72,8 +148,6 @@ export default function JamModal() {
     setParticipants,
     setJamQueue,
     addToJamQueue,
-    removeFromJamQueue,
-    reorderJamQueue,
     setCurrentJamTrack,
     setJamModalOpen,
     leaveJam,
@@ -82,11 +156,8 @@ export default function JamModal() {
   const {
     currentTrack,
     isPlaying,
-    currentTime,
-    duration,
     togglePlay,
     nextTrack,
-    setCurrentTrack,
   } = usePlayerStore();
 
   const [inputCode, setInputCode] = useState("");
@@ -94,14 +165,14 @@ export default function JamModal() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
-  // Proponowane do Dżemu
+  // Rekomendacje
   const [recommendations, setRecommendations] = useState<any[]>([]);
   const [isLoadingRecs, setIsLoadingRecs] = useState(false);
   const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const fadeIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Pobieranie danych aktualnego użytkownika
+  // 1. Precyzyjne pobieranie profilu usera
   useEffect(() => {
     const fetchUser = async () => {
       try {
@@ -113,10 +184,17 @@ export default function JamModal() {
             .eq("id", user.id)
             .maybeSingle();
 
+          const finalUsername =
+            profile?.username ||
+            user.user_metadata?.username ||
+            user.user_metadata?.full_name ||
+            user.email?.split("@")[0] ||
+            "Uczestnik";
+
           setCurrentUser({
             id: user.id,
-            username: profile?.username || user.email?.split("@")[0] || "Uczestnik",
-            avatarUrl: profile?.avatarUrl || null,
+            username: finalUsername,
+            avatarUrl: profile?.avatarUrl || user.user_metadata?.avatar_url || null,
           });
         }
       } catch {}
@@ -124,7 +202,7 @@ export default function JamModal() {
     fetchUser();
   }, [supabase]);
 
-  // 2. Obsługa kanału Supabase Realtime dla aktywnego Dżemu
+  // 2. Realtime Broadcast & Presence
   useEffect(() => {
     if (!jamCode || !currentUser) return;
 
@@ -136,7 +214,7 @@ export default function JamModal() {
       },
     });
 
-    jamRealtimeChannel = channel;
+    activeJamChannel = channel;
 
     channel
       .on("presence", { event: "sync" }, () => {
@@ -162,9 +240,28 @@ export default function JamModal() {
         if (!payload) return;
 
         switch (payload.type) {
+          case "REQUEST_SYNC":
+            // Gość prosi o stan -> Host wysyła mu aktualną kolejkę i utwór
+            if (useJamStore.getState().isHost) {
+              channel.send({
+                type: "broadcast",
+                event: "JAM_COMMAND",
+                payload: {
+                  type: "SYNC_QUEUE",
+                  queue: useJamStore.getState().jamQueue,
+                  track: usePlayerStore.getState().currentTrack,
+                  allowGuestControl: useJamStore.getState().allowGuestControl,
+                },
+              });
+            }
+            break;
+
           case "SYNC_QUEUE":
             if (Array.isArray(payload.queue)) {
               setJamQueue(payload.queue);
+            }
+            if (payload.track !== undefined) {
+              setCurrentJamTrack(payload.track);
             }
             if (payload.allowGuestControl !== undefined) {
               setAllowGuestControl(payload.allowGuestControl);
@@ -180,21 +277,20 @@ export default function JamModal() {
           case "ADD_TO_QUEUE":
             if (payload.track) {
               addToJamQueue(payload.track);
-              // Jeśli to Host, dokłada też do swojego lokalnego playera, gdy kolejka leci z Dżemu
-              if (isHost) {
+              if (useJamStore.getState().isHost) {
                 usePlayerStore.getState().addToQueue(payload.track);
               }
             }
             break;
 
           case "REMOTE_TOGGLE_PLAY":
-            if (isHost) {
+            if (useJamStore.getState().isHost) {
               togglePlay();
             }
             break;
 
           case "REMOTE_NEXT":
-            if (isHost) {
+            if (useJamStore.getState().isHost) {
               nextTrack();
             }
             break;
@@ -215,43 +311,29 @@ export default function JamModal() {
             onlineAt: new Date().toISOString(),
           });
 
-          // Jeśli jestem Hostem, rozgłaszam aktualny stan kolejki i bieżący utwór nowo przybyłym
-          if (isHost) {
+          // Jeśli to gość, od razu prosi o aktualną kolejkę
+          if (!isHost) {
             channel.send({
               type: "broadcast",
               event: "JAM_COMMAND",
-              payload: {
-                type: "SYNC_QUEUE",
-                queue: jamQueue,
-                allowGuestControl,
-              },
+              payload: { type: "REQUEST_SYNC" },
             });
-            if (currentTrack) {
-              channel.send({
-                type: "broadcast",
-                event: "JAM_COMMAND",
-                payload: {
-                  type: "SYNC_CURRENT_TRACK",
-                  track: currentTrack,
-                },
-              });
-            }
           }
         }
       });
 
     return () => {
-      jamRealtimeChannel = null;
+      activeJamChannel = null;
       supabase.removeChannel(channel);
     };
   }, [jamCode, currentUser, isHost]);
 
-  // Host synchronizuje swój bieżący utwór do Dżemu
+  // Synchronizacja bieżącego kawałka przez Hosta
   useEffect(() => {
-    if (!isHost || !jamCode || !jamRealtimeChannel) return;
+    if (!isHost || !jamCode || !activeJamChannel) return;
     if (currentTrack) {
       setCurrentJamTrack(currentTrack);
-      jamRealtimeChannel.send({
+      activeJamChannel.send({
         type: "broadcast",
         event: "JAM_COMMAND",
         payload: {
@@ -262,10 +344,9 @@ export default function JamModal() {
     }
   }, [currentTrack?.id, isHost, jamCode]);
 
-  // Funkcja rozsyłająca komendy po kanale Dżemu
   const sendJamCommand = (payload: any) => {
-    if (jamRealtimeChannel) {
-      jamRealtimeChannel.send({
+    if (activeJamChannel) {
+      activeJamChannel.send({
         type: "broadcast",
         event: "JAM_COMMAND",
         payload,
@@ -273,24 +354,18 @@ export default function JamModal() {
     }
   };
 
-  // Rozpoczęcie Dżemu (Host)
+  // 3. Tworzenie Dżemu z CZYSTĄ kolejką
   const handleCreateJam = () => {
     const newCode = generateJamCode();
     setJamCode(newCode, true);
 
-    // Na start bierzemy bieżący utwór jako granie Dżemu
     if (currentTrack) {
       setCurrentJamTrack(currentTrack);
     }
-    // Lokalna kolejka playera staje się pierwszą kolejką Dżemu
-    const initialQueue: JamTrack[] = (usePlayerStore.getState().queue || []).map((t) => ({
-      ...t,
-      addedBy: currentUser ? { id: currentUser.id, username: currentUser.username, avatarUrl: currentUser.avatarUrl } : undefined,
-    }));
-    setJamQueue(initialQueue);
+    // CZYSTA KOLEJKA NA START
+    setJamQueue([]);
   };
 
-  // Dołączenie do Dżemu (Gość)
   const handleJoinJam = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = inputCode.trim().toUpperCase();
@@ -299,10 +374,10 @@ export default function JamModal() {
       return;
     }
     setJamCode(clean, false);
+    setJamQueue([]);
     setInputCode("");
   };
 
-  // Zakończenie sesji
   const handleLeaveOrCloseJam = () => {
     if (isHost) {
       if (confirm("Czy na pewno chcesz zamknąć Songify Dżem dla wszystkich uczestników?")) {
@@ -314,7 +389,6 @@ export default function JamModal() {
     }
   };
 
-  // Kopiowanie kodu PIN do schowka
   const handleCopyCode = () => {
     if (!jamCode) return;
     navigator.clipboard.writeText(jamCode);
@@ -322,7 +396,6 @@ export default function JamModal() {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  // Usuwanie piosenki z kolejki Dżemu
   const handleRemoveTrack = (index: number) => {
     if (!isHost && !allowGuestControl) return;
     const updated = jamQueue.filter((_, i) => i !== index);
@@ -334,7 +407,6 @@ export default function JamModal() {
     }
   };
 
-  // Zmiana kolejności piosenek w kolejce Dżemu
   const handleDrop = (targetIdx: number) => {
     if (!isHost && !allowGuestControl) return;
     if (draggedIdx === null || draggedIdx === targetIdx) return;
@@ -351,7 +423,6 @@ export default function JamModal() {
     }
   };
 
-  // Zdalne sterowanie (Gość wysyła do Hosta)
   const handleTogglePlayRemote = () => {
     if (isHost) {
       togglePlay();
@@ -368,7 +439,7 @@ export default function JamModal() {
     }
   };
 
-  // Pobieranie proponowanych utworów do Dżemu
+  // Rekomendacje
   const loadJamRecommendations = async () => {
     if (!jamCode) return;
     setIsLoadingRecs(true);
@@ -406,7 +477,6 @@ export default function JamModal() {
     }
   }, [jamCode, isJamModalOpen]);
 
-  // Obsługa 10s odsłuchu w polecanych
   const stopPreview = () => {
     if (fadeIntervalRef.current) {
       clearInterval(fadeIntervalRef.current);
@@ -463,22 +533,7 @@ export default function JamModal() {
   };
 
   const handleAddRecToJam = (song: any) => {
-    const newTrack: JamTrack = {
-      id: String(song.id),
-      title: song.title,
-      artist: song.artist,
-      albumCover: song.albumCover,
-      duration: song.duration,
-      addedBy: currentUser ? { id: currentUser.id, username: currentUser.username, avatarUrl: currentUser.avatarUrl } : undefined,
-    };
-
-    addToJamQueue(newTrack);
-    sendJamCommand({ type: "ADD_TO_QUEUE", track: newTrack });
-
-    if (isHost) {
-      usePlayerStore.getState().addToQueue(newTrack);
-    }
-
+    addTrackToJamSession(song);
     setRecommendations((prev) => prev.filter((r) => r.id !== song.id));
   };
 
@@ -516,9 +571,8 @@ export default function JamModal() {
         {/* ZAWARTOŚĆ MODALA */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           {!jamCode ? (
-            /* =================== WIDOK STARTOWY =================== */
+            /* WIDOK STARTOWY */
             <div className="space-y-6 my-auto">
-              {/* KARTA 1: UTWÓRZ DŻEM */}
               <div className="rounded-2xl border border-teal-900/50 bg-[#121c20] p-4.5 space-y-3.5 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider text-teal-400 [html.light_&]:text-[#db2777]">
@@ -531,7 +585,6 @@ export default function JamModal() {
                   Muzyka będzie leciała z Twojego urządzenia (np. z głośnika), a znajomi będą mogli zdalnie dokładać swoje utwory.
                 </p>
 
-                {/* Przełącznik uprawnień */}
                 <label className="flex items-center justify-between p-2.5 rounded-xl bg-[#091013] border border-teal-950/60 cursor-pointer [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#fecdd3]">
                   <div className="flex items-center gap-2">
                     <SlidersHorizontal className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
@@ -554,7 +607,6 @@ export default function JamModal() {
                 </button>
               </div>
 
-              {/* KARTA 2: DOŁĄCZ DO DŻEMU */}
               <form onSubmit={handleJoinJam} className="rounded-2xl border border-teal-900/50 bg-[#121c20] p-4.5 space-y-3.5 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]">
                 <span className="text-xs font-bold uppercase tracking-wider text-teal-400 [html.light_&]:text-[#db2777] block">
                   Dołącz do trwającego Dżemu
@@ -584,7 +636,7 @@ export default function JamModal() {
               </form>
             </div>
           ) : (
-            /* =================== WIDOK AKTYWNEJ SESJI =================== */
+            /* WIDOK AKTYWNEJ SESJI */
             <div className="space-y-5">
               {/* PASEK Z KODEM PIN I UCZESTNIKAMI */}
               <div className="rounded-2xl border border-teal-500/30 bg-[#121c20] p-3.5 flex items-center justify-between [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#fecdd3]">
@@ -599,22 +651,28 @@ export default function JamModal() {
                     {copiedCode ? <Check className="h-3.5 w-3.5 text-teal-400 stroke-[3]" /> : <Copy className="h-3.5 w-3.5" />}
                   </button>
 
+                  {/* KROPECZKI / AWATARY Z KOLORAMI */}
                   <div className="flex items-center -space-x-2">
-                    {participants.slice(0, 4).map((p) => (
-                      <div
-                        key={p.id}
-                        className="h-7 w-7 rounded-full border-2 border-[#121c20] overflow-hidden bg-teal-900 flex items-center justify-center text-[10px] font-bold text-white"
-                        title={p.username}
-                      >
-                        {p.avatarUrl ? (
-                          <img src={p.avatarUrl} alt={p.username} className="h-full w-full object-cover" />
-                        ) : (
-                          p.username.charAt(0).toUpperCase()
-                        )}
-                      </div>
-                    ))}
+                    {participants.slice(0, 4).map((p) => {
+                      const bgClass = getAvatarBgColor(p.username);
+                      const initial = (p.username?.trim()?.[0] || "U").toUpperCase();
+
+                      return (
+                        <div
+                          key={p.id}
+                          className={`h-7 w-7 rounded-full border-2 border-[#121c20] [html.light_&]:border-white overflow-hidden ${bgClass} flex items-center justify-center text-[10px] font-bold shadow-sm`}
+                          title={`${p.username}${p.isHost ? " (Host)" : ""}`}
+                        >
+                          {p.avatarUrl ? (
+                            <img src={p.avatarUrl} alt={p.username} className="h-full w-full object-cover" />
+                          ) : (
+                            <span>{initial}</span>
+                          )}
+                        </div>
+                      );
+                    })}
                     {participants.length > 4 && (
-                      <div className="h-7 w-7 rounded-full border-2 border-[#121c20] bg-gray-800 flex items-center justify-center text-[9px] font-bold text-gray-300">
+                      <div className="h-7 w-7 rounded-full border-2 border-[#121c20] [html.light_&]:border-white bg-gray-800 flex items-center justify-center text-[9px] font-bold text-gray-300">
                         +{participants.length - 4}
                       </div>
                     )}
@@ -657,7 +715,6 @@ export default function JamModal() {
                       </div>
                     </div>
 
-                    {/* Kontrolki zdalne */}
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
                         type="button"
@@ -682,7 +739,7 @@ export default function JamModal() {
                 </div>
               )}
 
-              {/* SEKCJA: WSPÓLNA KOLEJKA */}
+              {/* WSPÓLNA KOLEJKA */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[10px] font-extrabold uppercase tracking-widest text-gray-400 [html.light_&]:text-[#be123c]">
@@ -695,7 +752,7 @@ export default function JamModal() {
 
                 {jamQueue.length === 0 ? (
                   <div className="py-8 text-center text-xs text-gray-500 [html.light_&]:text-[#f472b6]">
-                    Kolejka jest pusta. Dodaj utwór poniżej!
+                    Kolejka jest pusta. Dodaj utwór przesuwając palcem w prawo na playliście lub wyszukiwarce!
                   </div>
                 ) : (
                   <div className="space-y-1.5">
@@ -730,7 +787,7 @@ export default function JamModal() {
                                 {track.artist}
                               </span>
                               {track.addedBy && (
-                                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-teal-950/60 text-teal-300 border border-teal-800/40 truncate max-w-[90px] [html.light_&]:bg-[#fff1f2] [html.light_&]:text-[#db2777] [html.light_&]:border-[#fbcfe8]">
+                                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-teal-950/60 text-teal-300 border border-teal-800/40 truncate max-w-[110px] [html.light_&]:bg-[#fff1f2] [html.light_&]:text-[#db2777] [html.light_&]:border-[#fbcfe8]">
                                   {track.addedBy.username}
                                 </span>
                               )}
@@ -738,7 +795,6 @@ export default function JamModal() {
                           </div>
                         </div>
 
-                        {/* Akcje: usuwanie i przeciąganie */}
                         {(isHost || allowGuestControl) && (
                           <div className="flex items-center gap-1 flex-shrink-0">
                             <button
@@ -763,7 +819,7 @@ export default function JamModal() {
                 )}
               </div>
 
-              {/* SEKCJA: PROPONOWANE DO DŻEMU */}
+              {/* PROPONOWANE DO DŻEMU */}
               <div className="pt-4 border-t border-teal-950/60 [html.light_&]:border-[#fce7f3]">
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-1.5">
@@ -848,62 +904,4 @@ export default function JamModal() {
       </div>
     </div>
   );
-}
-
-// Globalna funkcja dodająca utwór do aktywnego Dżemu z dowolnego miejsca w aplikacji
-export async function addTrackToJamSession(track: any) {
-  const jamState = useJamStore.getState();
-  if (!jamState.jamCode) return false;
-
-  // Pobieramy dane zalogowanego usera do podpisu "addedBy"
-  const supabase = createClient();
-  let addedBy: any = undefined;
-
-  try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase
-        .from("User")
-        .select("id, username, avatarUrl")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      addedBy = {
-        id: user.id,
-        username: profile?.username || user.email?.split("@")[0] || "Uczestnik",
-        avatarUrl: profile?.avatarUrl || null,
-      };
-    }
-  } catch {}
-
-  const newJamTrack: JamTrack = {
-    id: String(track.id),
-    title: track.title,
-    artist: track.artist,
-    albumCover: track.albumCover,
-    duration: track.duration,
-    addedBy,
-  };
-
-  // 1. Dodajemy lokalnie w magazynie Dżemu
-  jamState.addToJamQueue(newJamTrack);
-
-  // 2. Jeśli jesteśmy Hostem, wpada to też do lokalnego odtwarzacza
-  if (jamState.isHost) {
-    usePlayerStore.getState().addToQueue(newJamTrack);
-  }
-
-  // 3. Rozgłaszamy po Realtime do wszystkich na imprezie
-  if (jamRealtimeChannel) {
-    jamRealtimeChannel.send({
-      type: "broadcast",
-      event: "JAM_COMMAND",
-      payload: {
-        type: "ADD_TO_QUEUE",
-        track: newJamTrack,
-      },
-    });
-  }
-
-  return true;
 }
