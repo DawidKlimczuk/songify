@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, ChangeEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   ArrowLeft,
   MoreVertical,
@@ -28,6 +29,7 @@ import {
   Bookmark,
 } from "lucide-react";
 import { usePlayerStore } from "@/lib/store/player-store";
+import { createClient } from "@/lib/supabase/client";
 import {
   getPlaylistDetails,
   removeSongFromPlaylist,
@@ -49,6 +51,52 @@ function SpotifyIcon({ className = "h-4 w-4" }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.516 17.307c-.218.358-.68.472-1.038.254-2.87-1.753-6.482-2.15-10.738-1.177-.41.093-.815-.164-.908-.573-.093-.41.164-.814.573-.907 4.671-1.068 8.665-.615 11.86 1.365.357.218.471.68.253 1.038zm1.48-3.284c-.276.446-.86.588-1.306.313-3.283-2.018-8.288-2.603-12.172-1.423-.5.152-1.028-.135-1.18-.635-.152-.5.135-1.028.636-1.18 4.437-1.347 9.948-.698 13.71 1.618.446.276.587.86.312 1.307zm.128-3.418C15.202 8.293 8.76 8.08 5.097 9.192c-.604.183-1.246-.164-1.429-.767-.183-.604.164-1.246.767-1.429 4.22-1.282 11.332-1.034 15.82 1.63.544.323.722 1.028.4 1.572-.323.544-1.028.723-1.531.408z" />
     </svg>
+  );
+}
+
+function getAvatarBgColor(name: string) {
+  const colors = [
+    "bg-emerald-600 text-white",
+    "bg-indigo-600 text-white",
+    "bg-rose-600 text-white",
+    "bg-amber-600 text-white",
+    "bg-sky-600 text-white",
+    "bg-purple-600 text-white",
+    "bg-teal-600 text-white",
+  ];
+  let hash = 0;
+  for (let i = 0; i < (name || "").length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+}
+
+function UserAvatarBadge({
+  user,
+  size = "h-5 w-5 text-[10px]",
+}: {
+  user: { avatarUrl?: string | null; username?: string | null } | null;
+  size?: string;
+}) {
+  const initial = (user?.username?.trim()?.[0] || "U").toUpperCase();
+  const bg = getAvatarBgColor(user?.username || "");
+
+  if (user?.avatarUrl) {
+    return (
+      <img
+        src={user.avatarUrl}
+        alt={user.username || "Awatar"}
+        className={`${size} rounded-full object-cover`}
+      />
+    );
+  }
+
+  return (
+    <div
+      className={`${size} ${bg} rounded-full flex items-center justify-center font-bold select-none shadow-sm`}
+    >
+      {initial}
+    </div>
   );
 }
 
@@ -194,7 +242,38 @@ export default function PlaylistView() {
 
   useEffect(() => {
     loadData();
-  }, [playlistId, isLiked]);
+
+    // 1. Reakcja na akcje lokalne (np. z modala w tej samej karcie)
+    const handleLocalPlaylistUpdate = (e: any) => {
+      if (!e.detail || e.detail.playlistId === playlistId) {
+        loadData();
+      }
+    };
+    window.addEventListener("songify_playlist_updated", handleLocalPlaylistUpdate);
+
+    // 2. Realtime WebSockets: odpala odświeżenie TYLKO gdy ktoś doda lub usunie utwór
+    const supabase = createClient();
+    const channel = supabase
+      .channel(`playlist_${playlistId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "PlaylistSong",
+          filter: `playlistId=eq.${playlistId}`,
+        },
+        () => {
+          loadData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      window.removeEventListener("songify_playlist_updated", handleLocalPlaylistUpdate);
+      supabase.removeChannel(channel);
+    };
+  }, [playlistId]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -277,12 +356,26 @@ export default function PlaylistView() {
 
   const confirmDeleteSong = async () => {
     if (!songToDelete) return;
-    await removeSongFromPlaylist(playlistId, songToDelete);
+    const targetSongId = songToDelete;
+    setSongToDelete(null);
+
+    // 1. Natychmiastowe usunięcie z widoku bez mrugnięcia
     setPlaylist((prev: any) => ({
       ...prev,
-      songs: prev.songs.filter((item: any) => item.song.id !== songToDelete),
+      songs: prev.songs.filter((item: any) => String(item.song.id) !== String(targetSongId)),
     }));
-    setSongToDelete(null);
+
+    try {
+      await removeSongFromPlaylist(playlistId, targetSongId);
+      // Rozgłaszamy event, żeby inne komponenty też wiedziały o usunięciu
+      window.dispatchEvent(
+        new CustomEvent("songify_playlist_updated", { detail: { playlistId } })
+      );
+    } catch (err) {
+      console.error("Błąd usuwania utworu z playlisty:", err);
+      // Jeśli serwer odrzucił (np. brak uprawnień) -> cicho przywracamy stan
+      loadData();
+    }
   };
 
   // Obsługa pobrania utworów (Link lub Tekst/CSV) i dodania do polubionych
@@ -737,18 +830,18 @@ export default function PlaylistView() {
 
               {/* Twórca Playlisty i Współtwórcy */}
               <div className="flex items-center gap-2 pt-0.5 flex-wrap">
-                <div className="flex items-center gap-1.5">
-                  <div className="h-5 w-5 rounded-full overflow-hidden bg-teal-950 border border-teal-800/60 flex items-center justify-center flex-shrink-0 [html.light_&]:border-[#fbcfe8]">
-                    {playlist.user?.avatarUrl ? (
-                      <img src={playlist.user.avatarUrl} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <UserIcon className="h-3 w-3 text-teal-400 [html.light_&]:text-[#db2777]" />
-                    )}
+                <Link
+                  href={playlist.user?.id ? `/profile/${playlist.user.id}` : "#"}
+                  className="flex items-center gap-1.5 hover:opacity-85 transition cursor-pointer group"
+                  title="Zobacz profil twórcy"
+                >
+                  <div className="h-5 w-5 rounded-full border border-teal-800/60 flex items-center justify-center flex-shrink-0 overflow-hidden [html.light_&]:border-[#fbcfe8]">
+                    <UserAvatarBadge user={playlist.user} size="h-full w-full text-[9px]" />
                   </div>
-                  <span className="truncate font-bold text-sm text-white [html.light_&]:text-[#5c0612]">
+                  <span className="truncate font-bold text-sm text-white group-hover:underline [html.light_&]:text-[#5c0612]">
                     {playlist.user?.username || "Klima"}
                   </span>
-                </div>
+                </Link>
 
                 {/* Sekcja awatarów współtwórców (limit do 16) */}
                 {playlist.is_collaborative && playlist.members && playlist.members.length > 0 && (
@@ -758,13 +851,9 @@ export default function PlaylistView() {
                         <div
                           key={m.userId}
                           title={m.user?.username}
-                          className="h-5 w-5 rounded-full overflow-hidden border border-[#0e1619] bg-teal-950 flex items-center justify-center flex-shrink-0 [html.light_&]:border-white"
+                          className="h-5 w-5 rounded-full border border-[#0e1619] [html.light_&]:border-white flex-shrink-0 overflow-hidden"
                         >
-                          {m.user?.avatarUrl ? (
-                            <img src={m.user.avatarUrl} alt="" className="h-full w-full object-cover" />
-                          ) : (
-                            <UserIcon className="h-2.5 w-2.5 text-teal-400 [html.light_&]:text-[#db2777]" />
-                          )}
+                          <UserAvatarBadge user={m.user} size="h-full w-full text-[9px]" />
                         </div>
                       ))}
                     </div>
@@ -868,7 +957,9 @@ export default function PlaylistView() {
 
           {
             const songWrapper = playlist.songs?.find((item: any) => item.song.id === song.id);
-            const addedByUser = songWrapper?.addedBy || null;
+            // Awatar przekazujemy TYLKO dla playlist współtworzonych
+            const addedByUser = playlist.is_collaborative ? (songWrapper?.addedBy || null) : null;
+            
             // Host usuwa wszystko, współtwórca tylko swoje piosenki
             const canDeleteThisSong =
               playlist.isOwner || (playlist.isMember && songWrapper?.addedById === playlist.currentUserId);
@@ -1169,33 +1260,48 @@ export default function PlaylistView() {
                 />
               </div>
 
-              <div className="flex items-center justify-between rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3]">
-                <div className="flex items-center gap-2">
-                  {editIsPublic ? (
+              {/* Blokada dla współtworzonych (zawsze publiczna) vs zwykły toggle */}
+              {playlist?.is_collaborative ? (
+                <div className="rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3]">
+                  <div className="flex items-center gap-2 mb-1">
                     <Globe className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
-                  ) : (
-                    <Lock className="h-4 w-4 text-gray-400 [html.light_&]:text-[#9f1239]" />
-                  )}
-                  <span className="text-xs font-semibold text-white [html.light_&]:text-[#5c0612]">
-                    {editIsPublic ? "Publiczna" : "Prywatna"}
-                  </span>
+                    <span className="text-xs font-semibold text-white [html.light_&]:text-[#5c0612]">
+                      Playlista publiczna
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 [html.light_&]:text-[#9f1239] leading-relaxed">
+                    Playlista współtworzona musi pozostać publiczna, aby uczestnicy mogli z niej korzystać.
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setEditIsPublic(!editIsPublic)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
-                    editIsPublic
-                      ? "bg-teal-400 [html.light_&]:bg-[#db2777]"
-                      : "bg-gray-700 [html.light_&]:bg-gray-300"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black [html.light_&]:bg-white transition-transform ${
-                      editIsPublic ? "translate-x-4.5" : "translate-x-1"
+              ) : (
+                <div className="flex items-center justify-between rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3]">
+                  <div className="flex items-center gap-2">
+                    {editIsPublic ? (
+                      <Globe className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                    ) : (
+                      <Lock className="h-4 w-4 text-gray-400 [html.light_&]:text-[#9f1239]" />
+                    )}
+                    <span className="text-xs font-semibold text-white [html.light_&]:text-[#5c0612]">
+                      {editIsPublic ? "Publiczna" : "Prywatna"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditIsPublic(!editIsPublic)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                      editIsPublic
+                        ? "bg-teal-400 [html.light_&]:bg-[#db2777]"
+                        : "bg-gray-700 [html.light_&]:bg-gray-300"
                     }`}
-                  />
-                </button>
-              </div>
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black [html.light_&]:bg-white transition-transform ${
+                        editIsPublic ? "translate-x-4.5" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -1534,18 +1640,16 @@ function PlaylistItemRow({
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Awatar osoby, która dodała piosenkę (czerwony punkt ze screena) */}
+          {/* Awatar osoby, która dodała piosenkę */}
           {addedBy && (
-            <div
-              title={`Dodane przez: ${addedBy.username || "Użytkownik"}`}
-              className="h-6 w-6 rounded-full overflow-hidden border border-teal-500/40 bg-teal-950 flex items-center justify-center [html.light_&]:border-[#fbcfe8] [html.light_&]:bg-[#fff1f2]"
+            <Link
+              href={addedBy.id ? `/profile/${addedBy.id}` : "#"}
+              onClick={(e) => e.stopPropagation()}
+              title={`Profil: ${addedBy.username || "Użytkownik"}`}
+              className="h-6 w-6 rounded-full border border-teal-500/40 [html.light_&]:border-[#fbcfe8] flex-shrink-0 overflow-hidden hover:scale-110 active:scale-95 transition cursor-pointer shadow-sm"
             >
-              {addedBy.avatarUrl ? (
-                <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <UserIcon className="h-3 w-3 text-teal-400 [html.light_&]:text-[#db2777]" />
-              )}
-            </div>
+              <UserAvatarBadge user={addedBy} size="h-full w-full text-[10px]" />
+            </Link>
           )}
 
           {/* Krzyżyk usuwania widoczny tylko jeśli user ma uprawnienia (Host lub autor) */}

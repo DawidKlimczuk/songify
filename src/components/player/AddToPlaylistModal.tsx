@@ -66,34 +66,45 @@ export default function AddToPlaylistModal() {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
+    const toAdd = selectedIds.filter((id) => !initialSelectedIds.includes(id));
+    const toRemove = initialSelectedIds.filter((id) => !selectedIds.includes(id));
+
     try {
-      const toAdd = selectedIds.filter((id) => !initialSelectedIds.includes(id));
-      const toRemove = initialSelectedIds.filter((id) => !selectedIds.includes(id));
+      // 1. Zapisujemy w bazie
+      for (const pId of toAdd) {
+        await addSongToPlaylist(pId, {
+          id: currentTrack.id,
+          title: currentTrack.title,
+          artist: currentTrack.artist,
+          albumCover: currentTrack.albumCover,
+          duration: currentTrack.duration,
+        });
+      }
+      for (const pId of toRemove) {
+        await removeSongFromPlaylist(pId, currentTrack.id);
+      }
 
-      await Promise.all([
-        ...toAdd.map((playlistId) =>
-          addSongToPlaylist(playlistId, {
-            id: currentTrack.id,
-            title: currentTrack.title,
-            artist: currentTrack.artist,
-            albumCover: currentTrack.albumCover,
-            duration: currentTrack.duration,
-          })
-        ),
-        ...toRemove.map((playlistId) =>
-          removeSongFromPlaylist(playlistId, currentTrack.id)
-        ),
-      ]);
-
+      // 2. Pokazujemy sukces
       setSuccessNotice(true);
+      setIsSubmitting(false);
+
+      // 3. Emitujemy event dla otwartej w tle playlisty
+      const affectedIds = Array.from(new Set([...toAdd, ...toRemove]));
+      affectedIds.forEach((pId) => {
+        window.dispatchEvent(
+          new CustomEvent("songify_playlist_updated", { detail: { playlistId: pId } })
+        );
+      });
+
+      // 4. Zamykamy modal
       setTimeout(() => {
         setSuccessNotice(false);
         setAddToPlaylistOpen(false);
-      }, 700);
+      }, 500);
     } catch (err) {
       console.error("Błąd zapisu zmian w playlistach:", err);
-    } finally {
       setIsSubmitting(false);
+      setSuccessNotice(false);
     }
   };
 
@@ -159,17 +170,36 @@ export default function AddToPlaylistModal() {
                   }`}
                 >
                   <div className="flex items-center gap-3 overflow-hidden min-w-0 pr-2">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-950/60 text-teal-400 border border-teal-900/40 flex-shrink-0 [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#db2777]">
+                    <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-teal-950/60 text-teal-400 border border-teal-900/40 flex-shrink-0 overflow-hidden [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#db2777]">
                       {playlist.coverUrl ? (
                         <img
                           src={playlist.coverUrl}
                           alt={playlist.name}
-                          className="h-full w-full object-cover rounded-xl"
+                          className="h-full w-full object-cover"
                         />
+                      ) : playlist.songs && playlist.songs.length > 0 ? (
+                        <div className="grid grid-cols-2 grid-rows-2 h-full w-full">
+                          {[0, 1, 2, 3].map((idx) => {
+                            const sCover = playlist.songs[idx]?.albumCover;
+                            return (
+                              <div
+                                key={idx}
+                                className="relative flex h-full w-full items-center justify-center border border-teal-900/20 bg-teal-950/50 [html.light_&]:border-white/30 [html.light_&]:bg-gradient-to-br [html.light_&]:from-[#ff758c] [html.light_&]:to-[#ff7eb3] overflow-hidden"
+                              >
+                                {sCover ? (
+                                  <img src={sCover} alt="" className="h-full w-full object-cover" />
+                                ) : (
+                                  <Music className="h-2 w-2 text-teal-400/60 [html.light_&]:text-white/95" />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       ) : (
-                        <Music className="h-4 w-4" />
+                        <Music className="h-4 w-4 text-teal-400/60 [html.light_&]:text-[#be123c]/60" />
                       )}
                     </div>
+
                     <div className="flex flex-col truncate">
                       <span className="truncate text-xs font-semibold text-white [html.light_&]:text-[#5c0612]">
                         {playlist.name}
