@@ -44,6 +44,7 @@ import {
   leaveCollaborativePlaylist,
 } from "@/app/actions/playlist";
 import { Users, Copy, LogOut } from "lucide-react";
+import { PlaylistRecommendations } from "@/components/playlist/PlaylistRecommendations";
 
 // Ikona Spotify SVG
 function SpotifyIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -992,6 +993,15 @@ export default function PlaylistView() {
           </div>
         )}
       </div>
+
+      {/* SEKCJA POLECANYCH UTWORÓW (ukryta w Polubionych utworach) */}
+      {!isLikedPlaylist && (
+        <PlaylistRecommendations
+          playlistId={playlistId}
+          songsCount={songsList.length}
+          onSongAdded={loadData}
+        />
+      )}
 
       {/* MODAL: Import utworów do Polubionych */}
       {isImportModalOpen && (

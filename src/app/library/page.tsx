@@ -38,7 +38,7 @@ function SpotifyIcon({ className = "h-4 w-4" }: { className?: string }) {
 }
 
 export default function LibraryPage() {
-  const [tab, setTab] = useState<"PLAYLISTY" | "ALBUMY" | "POBRANE">("PLAYLISTY");
+  const [tab, setTab] = useState<"PLAYLISTY" | "ALBUMY" | "POBRANE" | "TWÓRCY">("PLAYLISTY");
   const [searchQuery, setSearchQuery] = useState("");
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -440,15 +440,15 @@ export default function LibraryPage() {
       </div>
 
       {/* Zakładki */}
-      <div className="flex gap-2 mb-4 border-b border-teal-950/60 pb-3">
-        {(["PLAYLISTY", "ALBUMY", "POBRANE"] as const).map((t) => (
+      <div className="flex gap-2 mb-4 border-b border-teal-950/60 pb-3 [html.light_&]:border-[#fce7f3] overflow-x-auto [&::-webkit-scrollbar]:hidden">
+        {(["PLAYLISTY", "ALBUMY", "POBRANE", "TWÓRCY"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold tracking-wider transition ${
+            className={`rounded-full px-4 py-1.5 text-xs font-semibold tracking-wider transition cursor-pointer flex-shrink-0 ${
               tab === t
-                ? "bg-teal-500 text-black shadow-md shadow-teal-500/20"
-                : "bg-[#0e1619] text-gray-400 border border-teal-900/30 hover:text-white"
+                ? "bg-teal-500 text-black shadow-md shadow-teal-500/20 [html.light_&]:bg-[#db2777] [html.light_&]:text-white [html.light_&]:shadow-[#db2777]/30"
+                : "bg-[#0e1619] text-gray-400 border border-teal-900/30 hover:text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#881337]"
             }`}
           >
             {t}
@@ -588,6 +588,19 @@ export default function LibraryPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center text-gray-500">
           <Download className="h-10 w-10 mb-2 text-gray-600" />
           <p className="text-xs">Brak pobranych utworów offline- Zaczekaj na update aplikacji</p>
+        </div>
+      )}
+
+      {/* Widok: TWÓRCY */}
+      {tab === "TWÓRCY" && (
+        <div className="flex flex-col items-center justify-center py-20 text-center text-gray-500 [html.light_&]:text-[#9f1239]">
+          <Users className="h-10 w-10 mb-2 text-teal-500/50 [html.light_&]:text-[#db2777]/60" />
+          <p className="text-xs font-semibold text-white [html.light_&]:text-[#5c0612] mb-1">
+            Brak obserwowanych twórców
+          </p>
+          <p className="text-[11px] text-gray-400 [html.light_&]:text-[#9f1239]">
+            Wkrótce pojawią się tutaj artyści i profile, które obserwujesz.
+          </p>
         </div>
       )}
 
@@ -1362,7 +1375,7 @@ export default function LibraryPage() {
           </div>
         </div>
       )}
-      
+
     </div>
   );
 }

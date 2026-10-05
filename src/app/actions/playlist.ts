@@ -1159,3 +1159,148 @@ export async function leaveCollaborativePlaylist(playlistId: string) {
   revalidatePath(`/library/playlist/${playlistId}`);
   return { success: true };
 }
+
+export async function getRecommendedSongsForPlaylist(
+  playlistId: string,
+  excludeSongIds: string[] = []
+) {
+  try {
+    const currentPlaylist = await prisma.playlist.findUnique({
+      where: { id: playlistId },
+      include: {
+        songs: {
+          include: {
+            song: true,
+          },
+        },
+      },
+    });
+
+    if (!currentPlaylist || currentPlaylist.songs.length === 0) {
+      return [];
+    }
+
+    const existingSongIds = new Set([
+      ...currentPlaylist.songs.map((s) => s.songId),
+      ...excludeSongIds,
+    ]);
+
+    const artists = Array.from(
+      new Set(
+        currentPlaylist.songs
+          .flatMap((s) => s.song.artist.split(/[,;&/]/))
+          .map((a) => a.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+
+    const candidateSongs = await prisma.song.findMany({
+      where: {
+        id: { notIn: Array.from(existingSongIds) },
+        OR: artists.map((art) => ({
+          artist: { contains: art, mode: "insensitive" },
+        })),
+      },
+      take: 40,
+    });
+
+    const seenArtists = new Set<string>();
+    const diversified: typeof candidateSongs = [];
+
+    const shuffled = [...candidateSongs].sort(() => 0.5 - Math.random());
+
+    for (const song of shuffled) {
+      const primaryArtist = song.artist.split(/[,;&/]/)[0].trim().toLowerCase();
+      if (!seenArtists.has(primaryArtist)) {
+        seenArtists.add(primaryArtist);
+        diversified.push(song);
+      }
+      if (diversified.length >= 5) break;
+    }
+
+    if (diversified.length < 5) {
+      const fallbackSongs = await prisma.song.findMany({
+        where: {
+          id: {
+            notIn: [
+              ...Array.from(existingSongIds),
+              ...diversified.map((s) => s.id),
+            ],
+          },
+        },
+        take: 15,
+        orderBy: { createdAt: "desc" },
+      });
+
+      const shuffledFallback = [...fallbackSongs].sort(() => 0.5 - Math.random());
+      for (const song of shuffledFallback) {
+        if (diversified.length >= 5) break;
+        diversified.push(song);
+      }
+    }
+
+    // Dociągamy bezpośredni link MP3 do 30s preview (Globalny Deezer + Globalny iTunes)
+    const withPreviews = await Promise.all(
+      diversified.map(async (s) => {
+        let previewUrl = "";
+        const cleanArtist = s.artist
+          .replace(/[\u00A0\u1680\u180e\u2000-\u200b\u202f\u205f\u3000\ufeff]/g, " ")
+          .split(/[,;&/]/)[0]
+          .trim();
+        const cleanTitle = s.title
+          .replace(/[\u00A0\u1680\u180e\u2000-\u200b\u202f\u205f\u3000\ufeff]/g, " ")
+          .replace(/\(.*?\)/g, "")
+          .replace(/\[.*?\]/g, "")
+          .trim();
+
+        const globalQuery = `${cleanArtist} ${cleanTitle}`.trim();
+
+        // 1. Globalne Deezer API (katalog światowy: US, UK, PL itp.)
+        try {
+          const dzRes = await fetch(
+            `https://api.deezer.com/search?q=${encodeURIComponent(globalQuery)}&limit=1`,
+            { next: { revalidate: 86400 } }
+          );
+          if (dzRes.ok) {
+            const dzData = await dzRes.json();
+            if (dzData.data?.[0]?.preview) {
+              previewUrl = dzData.data[0].preview;
+            }
+          }
+        } catch {}
+
+        // 2. Globalny fallback iTunes (bez blokady na kraj)
+        if (!previewUrl) {
+          try {
+            const itunesRes = await fetch(
+              `https://itunes.apple.com/search?term=${encodeURIComponent(
+                globalQuery
+              )}&media=music&limit=1`,
+              { next: { revalidate: 86400 } }
+            );
+            if (itunesRes.ok) {
+              const itData = await itunesRes.json();
+              if (itData.results?.[0]?.previewUrl) {
+                previewUrl = itData.results[0].previewUrl;
+              }
+            }
+          } catch {}
+        }
+
+        return {
+          id: s.id,
+          title: s.title,
+          artist: s.artist,
+          albumCover: s.albumCover,
+          duration: s.duration,
+          previewUrl,
+        };
+      })
+    );
+
+    return withPreviews;
+  } catch (error) {
+    console.error("Błąd pobierania rekomendacji:", error);
+    return [];
+  }
+}
