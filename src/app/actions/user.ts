@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export async function getUserProfile(userId: string) {
   try {
+    // 1. Pobieramy podstawowe dane użytkownika
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -11,41 +12,47 @@ export async function getUserProfile(userId: string) {
         username: true,
         avatarUrl: true,
         createdAt: true,
-        playlists: {
-          where: {
-            is_public: true,
-            is_owner_deleted: false,
-            name: {
-              notIn: ["Polubione utwory", "Liked Songs"],
-            },
-          },
-          orderBy: { createdAt: "desc" },
-          include: {
-            songs: {
-              take: 4,
-              orderBy: { addedAt: "desc" },
-              include: {
-                song: {
-                  select: { albumCover: true },
-                },
-              },
-            },
-            _count: {
-              select: { songs: true },
-            },
-          },
-        },
       },
     });
 
     if (!user) return null;
+
+    // 2. Pobieramy playlisty: własne ORAZ współtworzone (members)
+    const playlists = await prisma.playlist.findMany({
+      where: {
+        is_public: true,
+        is_owner_deleted: false,
+        name: {
+          notIn: ["Polubione utwory", "Liked Songs"],
+        },
+        OR: [
+          { userId: user.id },
+          { members: { some: { userId: user.id } } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        songs: {
+          take: 4,
+          orderBy: { addedAt: "desc" },
+          include: {
+            song: {
+              select: { albumCover: true },
+            },
+          },
+        },
+        _count: {
+          select: { songs: true },
+        },
+      },
+    });
 
     return {
       id: user.id,
       username: user.username,
       avatarUrl: user.avatarUrl,
       createdAt: user.createdAt,
-      playlists: user.playlists.map((p: any) => ({
+      playlists: playlists.map((p: any) => ({
         id: p.id,
         name: p.name,
         coverUrl: p.coverUrl,
