@@ -35,6 +35,9 @@ import {
 } from "lucide-react";
 import { useDeviceStore } from "@/lib/store/device-store";
 import DevicePickerModal from "./DevicePickerModal";
+import { useJamStore } from "@/lib/store/jam-store";
+import JamModal from "@/components/player/JamModal";
+
 function YoutubeIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24">
@@ -43,6 +46,30 @@ function YoutubeIcon({ className = "h-4 w-4" }: { className?: string }) {
         d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"
       />
       <polygon fill="#FFFFFF" points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" />
+    </svg>
+  );
+}
+
+function JamJarIcon({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Pokrywka słoiczka */}
+      <rect x="7" y="2" width="10" height="3" rx="1" />
+      {/* Kołnierz pod pokrywką */}
+      <path d="M6 5h12" />
+      {/* Korpus słoika */}
+      <path d="M5 8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V8z" />
+      {/* Etykieta dżemu w środku */}
+      <path d="M8 12h8" />
+      <path d="M9 15h6" />
     </svg>
   );
 }
@@ -80,12 +107,13 @@ export default function FullPlayer() {
 
   const { setDevicePickerOpen, activeDeviceId, deviceId } = useDeviceStore();
   const isPlayingRemotely = Boolean(activeDeviceId && activeDeviceId !== deviceId);
-
+  const { isJamModalOpen, setJamModalOpen, jamCode } = useJamStore();
   const [isSleepModalOpen, setIsSleepModalOpen] = useState(false);
   const [remainingTimerText, setRemainingTimerText] = useState<string | null>(null);
   const [selectedWheelMinutes, setSelectedWheelMinutes] = useState<number>(30);
   const wheelRef = useRef<HTMLDivElement>(null);
   const [scrubbingTime, setScrubbingTime] = useState<number | null>(null);
+  
 
   useEffect(() => {
     if (!sleepTimerEndsAt || sleepTimerMode !== "time") {
@@ -696,6 +724,7 @@ export default function FullPlayer() {
         </div>
 
         <div className="flex items-center justify-between px-3 pt-2">
+          {/* 1. KOLEJKA */}
           <button
             onClick={() => setIsQueueOpen(true)}
             className={`p-2 transition active:scale-90 cursor-pointer ${
@@ -706,6 +735,22 @@ export default function FullPlayer() {
             title="Kolejka odtwarzania"
           >
             <ListMusic className="h-5 w-5 stroke-[2.2] [html.light_&]:!stroke-[#9f1239]" />
+          </button>
+
+          {/* 2. SONGIFY DŻEM */}
+          <button
+            onClick={() => setJamModalOpen(true)}
+            className={`relative p-2 transition active:scale-90 cursor-pointer ${
+              jamCode || isJamModalOpen
+                ? "text-teal-400 [html.light_&]:!text-[#db2777]"
+                : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
+            }`}
+            title="Songify Dżem (Wspólna sesja imprezowa)"
+          >
+            <JamJarIcon className="h-5 w-5" />
+            {jamCode && (
+              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-teal-400 [html.light_&]:bg-[#db2777] animate-pulse" />
+            )}
           </button>
 
           <button
@@ -1417,6 +1462,9 @@ export default function FullPlayer() {
 
       {/* Modal wyboru urządzenia (Songify Connect) */}
       <DevicePickerModal />
+
+      {/* Modal Songify Dżem */}
+      <JamModal />
     </div>
   );
 }

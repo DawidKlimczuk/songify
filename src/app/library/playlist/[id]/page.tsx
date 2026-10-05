@@ -30,6 +30,8 @@ import {
 } from "lucide-react";
 import { usePlayerStore } from "@/lib/store/player-store";
 import { createClient } from "@/lib/supabase/client";
+import { useJamStore } from "@/lib/store/jam-store";
+import { addTrackToJamSession } from "@/components/player/JamModal";
 import {
   getPlaylistDetails,
   removeSongFromPlaylist,
@@ -618,7 +620,7 @@ export default function PlaylistView() {
     }
   };
 
-  const handleAddPlaylistToQueue = () => {
+  const handleAddPlaylistToQueue = async () => {
     if (songsList.length === 0) return;
 
     const formattedTracks = songsList.map((song: any) => ({
@@ -628,9 +630,18 @@ export default function PlaylistView() {
       source: playlist.name,
     }));
 
-    addMultipleToQueue(formattedTracks);
+    const jamCode = useJamStore.getState().jamCode;
 
-    setAddedQueueNotice(`${playlist.name} (${songsList.length} utworów)`);
+    if (jamCode) {
+      for (const track of formattedTracks) {
+        await addTrackToJamSession(track);
+      }
+      setAddedQueueNotice(`Dżem: ${playlist.name} (${songsList.length} utworów)`);
+    } else {
+      addMultipleToQueue(formattedTracks);
+      setAddedQueueNotice(`${playlist.name} (${songsList.length} utworów)`);
+    }
+
     setTimeout(() => setAddedQueueNotice(null), 2000);
   };
 
@@ -1496,17 +1507,27 @@ function PlaylistItemRow({
   const clampedDiff = Math.max(0, rawDiff);
   const offsetX = clampedDiff > 10 ? clampedDiff : 0;
 
-  const handleSwipeEnd = () => {
+  const handleSwipeEnd = async () => {
     if (swipedIdx?.id === String(song.id) && swipedIdx.isLockedHorizontal) {
       const diffX = swipedIdx.currentX - swipedIdx.startX;
       if (diffX > 75) {
-        addToQueue({
+        const trackData = {
           ...song,
           albumCover: coverUrl || song.albumCover || null,
           id: String(song.id),
           source: playlistName,
-        });
-        setAddedQueueNotice(song.title);
+        };
+
+        const isJamActive = Boolean(useJamStore.getState().jamCode);
+
+        if (isJamActive) {
+          await addTrackToJamSession(trackData);
+          setAddedQueueNotice(`Dżem: ${song.title}`);
+        } else {
+          addToQueue(trackData);
+          setAddedQueueNotice(song.title);
+        }
+
         setTimeout(() => setAddedQueueNotice(null), 1800);
       }
     }

@@ -17,6 +17,8 @@ import {
   Check,
 } from "lucide-react";
 import { usePlayerStore, Track } from "@/lib/store/player-store";
+import { useJamStore } from "@/lib/store/jam-store";
+import { addTrackToJamSession } from "@/components/player/JamModal";
 import {
   getOrCreateLikedPlaylist,
   addSongToPlaylist,
@@ -279,13 +281,21 @@ export default function PublicPlaylistPage() {
           const clampedDiff = Math.max(0, rawDiff);
           const offsetX = clampedDiff > 10 ? clampedDiff : 0;
 
-          const handleSwipeEnd = () => {
+          const handleSwipeEnd = async () => {
             if (swipedIdx?.idx === index && swipedIdx.isLockedHorizontal) {
               const diffX = swipedIdx.currentX - swipedIdx.startX;
               if (diffX > 75) {
-                // Przeciągnięto wystarczająco daleko -> Dodajemy do kolejki!
-                addToQueue({ ...song, source: playlist.title });
-                setAddedQueueNotice(song.title);
+                const trackData = { ...song, source: playlist.title };
+                const isJamActive = Boolean(useJamStore.getState().jamCode);
+
+                if (isJamActive) {
+                  await addTrackToJamSession(trackData);
+                  setAddedQueueNotice(`Dżem: ${song.title}`);
+                } else {
+                  addToQueue(trackData);
+                  setAddedQueueNotice(song.title);
+                }
+
                 setTimeout(() => setAddedQueueNotice(null), 1800);
               }
             }

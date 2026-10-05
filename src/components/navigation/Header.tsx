@@ -30,7 +30,7 @@ export default function Header({ username, avatarUrl }: HeaderProps) {
 
       <div className="flex items-center justify-center">
         <span className="font-[family-name:var(--font-drip)] text-2xl tracking-wider text-teal-400 drop-shadow-[0_2px_12px_rgba(45,212,191,0.55)] select-none">
-          SONGIFY
+          𝄞
         </span>
       </div>
 

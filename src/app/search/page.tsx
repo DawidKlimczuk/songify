@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { Search, X, Music, Play, Loader2, ListPlus, Check } from "lucide-react";
 import { usePlayerStore, Track } from "@/lib/store/player-store";
+import { useJamStore } from "@/lib/store/jam-store";
+import { addTrackToJamSession } from "@/components/player/JamModal";
 
 interface DeezerContributor {
   id: number;
@@ -115,12 +117,20 @@ export default function SearchPage() {
     setCurrentTrack(track, []); // Jawne zresetowanie kolejki playlisty
   };
 
-  const handleSwipeEnd = (track: Track) => {
+  const handleSwipeEnd = async (track: Track) => {
     if (swipedItem?.id === track.id && swipedItem.isLockedHorizontal) {
       const diffX = swipedItem.currentX - swipedItem.startX;
       if (diffX > 75) {
-        addToQueue(track);
-        setAddedQueueNotice(track.title);
+        const isJamActive = Boolean(useJamStore.getState().jamCode);
+
+        if (isJamActive) {
+          await addTrackToJamSession(track);
+          setAddedQueueNotice(`Dżem: ${track.title}`);
+        } else {
+          addToQueue(track);
+          setAddedQueueNotice(track.title);
+        }
+
         setTimeout(() => setAddedQueueNotice(null), 1800);
       }
     }
