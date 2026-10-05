@@ -24,7 +24,10 @@ import {
   createPlaylist,
   getUserPlaylists,
   importPlaylistFromTracks,
+  joinCollaborativePlaylist,
 } from "@/app/actions/playlist";
+import { Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 function SpotifyIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
@@ -39,10 +42,21 @@ export default function LibraryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [playlists, setPlaylists] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
 
   // Stany dla modali
   const [isPlusMenuOpen, setIsPlusMenuOpen] = useState(false);
   const [isCreatingModalOpen, setIsCreatingModalOpen] = useState(false);
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false);
+
+  // Flagi dla tworzonej playlisty
+  const [isCollaborativeCreate, setIsCollaborativeCreate] = useState(false);
+  const [allowMemberEditingCreate, setAllowMemberEditingCreate] = useState(false);
+
+  // Dołączanie do playlisty kodem
+  const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   // Stany dla przypinania playlist (max 5)
   const [pinnedIds, setPinnedIds] = useState<string[]>([]);
@@ -323,23 +337,58 @@ export default function LibraryPage() {
     try {
       const finalName = playlistName.trim() ? playlistName.trim() : undefined;
 
-      await createPlaylist({
+      const created = await createPlaylist({
         name: finalName,
         description: playlistDescription.trim(),
         coverUrl: coverPreview,
-        isPublic,
+        isPublic: isCollaborativeCreate ? true : isPublic,
+        isCollaborative: isCollaborativeCreate,
+        allowMemberEditing: allowMemberEditingCreate,
       });
 
       setPlaylistName("");
       setPlaylistDescription("");
       setCoverPreview(null);
       setIsPublic(true);
+      setIsCollaborativeCreate(false);
+      setAllowMemberEditingCreate(false);
       setIsCreatingModalOpen(false);
       await fetchPlaylists();
+
+      if (created?.id) {
+        router.push(`/library/playlist/${created.id}`);
+      }
     } catch (err) {
       console.error("Błąd tworzenia playlisty:", err);
+      alert("Nie udało się utworzyć playlisty.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleJoinPlaylist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = joinCodeInput.trim().toUpperCase();
+    if (cleanCode.length !== 6) {
+      setJoinError("Kod musi składać się z dokładnie 6 znaków.");
+      return;
+    }
+
+    setIsJoining(true);
+    setJoinError(null);
+
+    try {
+      const res = await joinCollaborativePlaylist(cleanCode);
+      if (res?.playlistId) {
+        setIsJoinModalOpen(false);
+        setJoinCodeInput("");
+        router.push(`/library/playlist/${res.playlistId}`);
+      }
+    } catch (err: any) {
+      console.error("Błąd dołączania do playlisty:", err);
+      setJoinError(err.message || "Nie udało się dołączyć do playlisty.");
+    } finally {
+      setIsJoining(false);
     }
   };
 
@@ -487,9 +536,16 @@ export default function LibraryPage() {
                             </span>
                           )}
                           <span>
-                            {item.is_public === false || item.isPublic === false
-                              ? "Prywatna playlista"
-                              : "Playlista"}
+                            {item.is_collaborative ? (
+                              <span className="inline-flex items-center gap-1 text-teal-400 font-semibold [html.light_&]:text-[#db2777]">
+                                <Users className="h-3 w-3" />
+                                Współtworzona
+                              </span>
+                            ) : item.is_public === false || item.isPublic === false ? (
+                              "Prywatna playlista"
+                            ) : (
+                              "Playlista"
+                            )}
                           </span>
                           <span>•</span>
                           <span className="truncate">
@@ -550,10 +606,13 @@ export default function LibraryPage() {
             </div>
 
             <div className="space-y-2">
+              {/* 1. Zwykła playlista */}
               <button
                 type="button"
                 onClick={() => {
                   setIsPlusMenuOpen(false);
+                  setIsCollaborativeCreate(false);
+                  setAllowMemberEditingCreate(false);
                   setIsCreatingModalOpen(true);
                 }}
                 className="flex w-full items-center gap-3.5 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#5c0612] [html.light_&]:hover:!bg-[#fae8ed]"
@@ -564,11 +623,57 @@ export default function LibraryPage() {
                 <div className="flex flex-col text-left">
                   <span className="font-semibold text-white [html.light_&]:text-[#5c0612]">Utwórz playlistę</span>
                   <span className="text-[10px] text-gray-400 [html.light_&]:text-[#9f1239] font-normal">
-                    Pusta playlista z własnym opisem
+                    Prywatna lub publiczna playlista
                   </span>
                 </div>
               </button>
 
+              {/* 2. Utwórz współtworzoną playlistę */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPlusMenuOpen(false);
+                  setIsCollaborativeCreate(true);
+                  setIsPublic(true);
+                  setAllowMemberEditingCreate(false);
+                  setIsCreatingModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3.5 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#5c0612] [html.light_&]:hover:!bg-[#fae8ed]"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-500/20 text-teal-400 [html.light_&]:!bg-[#db2777] [html.light_&]:!text-white shadow-sm flex-shrink-0">
+                  <Users className="h-4 w-4 stroke-[2.4]" />
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="font-semibold text-white [html.light_&]:text-[#5c0612]">Utwórz współtworzoną playlistę</span>
+                  <span className="text-[10px] text-gray-400 [html.light_&]:text-[#9f1239] font-normal">
+                    Generuje 6-znakowy kod dla znajomych
+                  </span>
+                </div>
+              </button>
+
+              {/* 3. Dołącz do współtworzonej playlisty */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPlusMenuOpen(false);
+                  setJoinCodeInput("");
+                  setJoinError(null);
+                  setIsJoinModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3.5 rounded-2xl px-4 py-3 text-xs font-semibold text-gray-200 bg-[#121c20] border border-teal-900/40 hover:bg-teal-950/60 hover:text-teal-400 transition active:scale-95 cursor-pointer [html.light_&]:!bg-[#fff5f7] [html.light_&]:!border-[#fce7f3] [html.light_&]:!text-[#5c0612] [html.light_&]:hover:!bg-[#fae8ed]"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-teal-500/20 text-teal-400 [html.light_&]:!bg-[#db2777] [html.light_&]:!text-white shadow-sm flex-shrink-0">
+                  <Plus className="h-4 w-4 stroke-[2.4]" />
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="font-semibold text-white [html.light_&]:text-[#5c0612]">Dołącz do playlisty</span>
+                  <span className="text-[10px] text-gray-400 [html.light_&]:text-[#9f1239] font-normal">
+                    Wpisz 6-znakowy kod dostępu
+                  </span>
+                </div>
+              </button>
+
+              {/* 4. Import ze Spotify */}
               <button
                 type="button"
                 onClick={() => {
@@ -928,7 +1033,9 @@ export default function LibraryPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-sm rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]">
             <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-4">
-              <h3 className="text-sm font-bold tracking-tight">Nowa playlista</h3>
+              <h3 className="text-sm font-bold tracking-tight">
+                {isCollaborativeCreate ? "Nowa playlista współtworzona" : "Nowa playlista"}
+              </h3>
               <button
                 type="button"
                 onClick={() => setIsCreatingModalOpen(false)}
@@ -1026,42 +1133,82 @@ export default function LibraryPage() {
                 />
               </div>
 
-              {/* Toggle: Publiczna / Prywatna */}
-              <div className="flex items-center justify-between rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]">
-                <div className="flex items-center gap-2.5">
-                  {isPublic ? (
-                    <Globe className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
-                  ) : (
-                    <Lock className="h-4 w-4 text-gray-400 [html.light_&]:text-[#9f1239]" />
-                  )}
-                  <div>
-                    <span className="block text-xs font-semibold text-gray-200 [html.light_&]:text-[#5c0612]">
-                      {isPublic ? "Playlista publiczna" : "Playlista prywatna"}
-                    </span>
-                    <span className="block text-[10px] text-gray-400 [html.light_&]:text-[#9f1239]">
-                      {isPublic
-                        ? "Będzie widoczna w wyszukiwarce dla innych"
-                        : "Dostępna tylko dla Ciebie"}
-                    </span>
-                  </div>
-                </div>
+              {/* Przełącznik zależny od trybu: Współtworzona vs Zwykła */}
+              {isCollaborativeCreate ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]">
+                    <div className="flex items-center gap-2.5">
+                      <Users className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                      <div>
+                        <span className="block text-xs font-semibold text-gray-200 [html.light_&]:text-[#5c0612]">
+                          Edycja danych przez współtwórców
+                        </span>
+                        <span className="block text-[10px] text-gray-400 [html.light_&]:text-[#9f1239]">
+                          {allowMemberEditingCreate
+                            ? "Wszyscy mogą zmieniać tytuł, opis i okładkę"
+                            : "Tylko Ty (Host) możesz zmieniać dane"}
+                        </span>
+                      </div>
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() => setIsPublic(!isPublic)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
-                    isPublic
-                      ? "bg-teal-400 [html.light_&]:bg-[#db2777]"
-                      : "bg-gray-700 [html.light_&]:bg-gray-300"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black [html.light_&]:bg-white transition-transform ${
-                      isPublic ? "translate-x-4.5" : "translate-x-1"
+                    <button
+                      type="button"
+                      onClick={() => setAllowMemberEditingCreate(!allowMemberEditingCreate)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                        allowMemberEditingCreate
+                          ? "bg-teal-400 [html.light_&]:bg-[#db2777]"
+                          : "bg-gray-700 [html.light_&]:bg-gray-300"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black [html.light_&]:bg-white transition-transform ${
+                          allowMemberEditingCreate ? "translate-x-4.5" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-teal-300/80 [html.light_&]:text-[#9f1239] px-1">
+                    Playlista współtworzona jest z automatu publiczna. Po utworzeniu otrzymasz <b>6-znakowy kod</b> do udostępnienia znajomym (do 16 osób).
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between rounded-xl bg-[#121c20] p-3 border border-teal-950/60 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]">
+                  <div className="flex items-center gap-2.5">
+                    {isPublic ? (
+                      <Globe className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                    ) : (
+                      <Lock className="h-4 w-4 text-gray-400 [html.light_&]:text-[#9f1239]" />
+                    )}
+                    <div>
+                      <span className="block text-xs font-semibold text-gray-200 [html.light_&]:text-[#5c0612]">
+                        {isPublic ? "Playlista publiczna" : "Playlista prywatna"}
+                      </span>
+                      <span className="block text-[10px] text-gray-400 [html.light_&]:text-[#9f1239]">
+                        {isPublic
+                          ? "Będzie widoczna w wyszukiwarce dla innych"
+                          : "Dostępna tylko dla Ciebie"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsPublic(!isPublic)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer ${
+                      isPublic
+                        ? "bg-teal-400 [html.light_&]:bg-[#db2777]"
+                        : "bg-gray-700 [html.light_&]:bg-gray-300"
                     }`}
-                  />
-                </button>
-              </div>
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-black [html.light_&]:bg-white transition-transform ${
+                        isPublic ? "translate-x-4.5" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
 
               {/* Przyciski Akcji */}
               <div className="flex justify-end gap-2 pt-2">
@@ -1146,6 +1293,76 @@ export default function LibraryPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL: DOŁĄCZ DO WSPÓŁTWORZONEJ PLAYLISTY KODEM */}
+      {isJoinModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm rounded-3xl border border-teal-900/80 bg-[#0c1417] p-5 shadow-2xl text-white [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]">
+            <div className="flex items-center justify-between pb-3 border-b border-teal-950/60 [html.light_&]:border-[#fce7f3] mb-4">
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                <h3 className="text-sm font-bold tracking-tight">Dołącz do playlisty</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsJoinModalOpen(false)}
+                className="p-1 rounded-full text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleJoinPlaylist} className="space-y-4">
+              <p className="text-[11px] text-gray-300 [html.light_&]:text-[#881337] leading-relaxed">
+                Wpisz 6-znakowy kod otrzymany od właściciela playlisty, aby wspólnie dodawać utwory.
+              </p>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-300 [html.light_&]:text-[#5c0612] mb-1.5">
+                  Kod zaproszenia (6 znaków)
+                </label>
+                <input
+                  type="text"
+                  maxLength={6}
+                  required
+                  placeholder="NP. W7K9M2"
+                  value={joinCodeInput}
+                  onChange={(e) => {
+                    setJoinCodeInput(e.target.value.toUpperCase());
+                    if (joinError) setJoinError(null);
+                  }}
+                  className="w-full text-center tracking-[0.3em] font-mono font-bold text-base uppercase rounded-xl border border-teal-900/60 bg-[#162125] px-3.5 py-3 text-white placeholder-gray-500 focus:border-teal-400 focus:outline-none [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#5c0612]"
+                />
+              </div>
+
+              {joinError && (
+                <div className="rounded-xl bg-red-950/40 border border-red-800/50 p-2.5 text-xs text-red-300">
+                  {joinError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsJoinModalOpen(false)}
+                  className="rounded-xl px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white [html.light_&]:text-[#9f1239] cursor-pointer"
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="submit"
+                  disabled={isJoining || joinCodeInput.trim().length !== 6}
+                  className="flex items-center gap-2 rounded-xl bg-teal-400 px-5 py-2.5 text-xs font-bold text-black shadow-lg shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition cursor-pointer [html.light_&]:bg-[#db2777] [html.light_&]:text-white disabled:opacity-50"
+                >
+                  {isJoining && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <span>{isJoining ? "Dołączanie..." : "Dołącz"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      
     </div>
   );
 }

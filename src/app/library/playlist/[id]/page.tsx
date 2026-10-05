@@ -39,7 +39,9 @@ import {
   updateSongCover,
   togglePlaylistVisibility,
   reclaimPlaylist,
+  leaveCollaborativePlaylist,
 } from "@/app/actions/playlist";
+import { Users, Copy, LogOut } from "lucide-react";
 
 // Ikona Spotify SVG
 function SpotifyIcon({ className = "h-4 w-4" }: { className?: string }) {
@@ -85,6 +87,27 @@ export default function PlaylistView() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [songToDelete, setSongToDelete] = useState<string | null>(null);
+
+  const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  const handleCopyCode = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!playlist?.join_code) return;
+    navigator.clipboard.writeText(playlist.join_code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  const handleLeavePlaylist = async () => {
+    try {
+      await leaveCollaborativePlaylist(playlistId);
+      router.push("/library");
+    } catch (err) {
+      console.error("Błąd opuszczania playlisty:", err);
+      alert("Nie udało się opuścić playlisty.");
+    }
+  };
 
   // Stany importu Spotify
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -543,44 +566,88 @@ export default function PlaylistView() {
               <span>Importuj utwory</span>
             </button>
           </div>
-        ) : playlist.isOwner ? (
-          <div className="relative" ref={menuRef}>
-            <button
-              onClick={() => setIsMenuOpen((prev) => !prev)}
-              className="flex h-9 w-9 items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-[#162125] transition border border-teal-900/30 cursor-pointer"
-              title="Opcje playlisty"
-            >
-              <MoreVertical className="h-5 w-5" />
-            </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            {/* Kod dołączenia dla Hosta z przyciskiem kopiowania */}
+            {playlist.isOwner && playlist.is_collaborative && playlist.join_code && (
+              <button
+                onClick={handleCopyCode}
+                className="flex items-center gap-1.5 rounded-full border border-teal-500/40 bg-[#0e1619] px-3 py-1.5 text-xs font-mono font-bold text-teal-300 hover:border-teal-400 hover:bg-[#162125] transition active:scale-95 cursor-pointer shadow-sm [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fbcfe8] [html.light_&]:text-[#db2777]"
+                title="Kliknij, aby skopiować kod dostępu"
+              >
+                {copiedCode ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-teal-400 [html.light_&]:text-[#db2777]" />
+                    <span>Skopiowano!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5 opacity-80" />
+                    <span>{playlist.join_code}</span>
+                  </>
+                )}
+              </button>
+            )}
 
-            {isMenuOpen && (
-              <div className="absolute right-0 top-11 z-50 w-44 rounded-2xl border border-teal-900/80 bg-[#0e1619] p-1.5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+            {/* Menu trzech kropek dla Właściciela lub Współtwórcy */}
+            {(playlist.isOwner || playlist.isMember) && (
+              <div className="relative" ref={menuRef}>
                 <button
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    setPreviewUrl(playlist.coverUrl || null);
-                    setSelectedFile(null);
-                    setIsEditModalOpen(true);
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-gray-200 hover:bg-[#162125] hover:text-teal-400 [html.light_&]:text-[#5c0612] [html.light_&]:hover:bg-[#fff1f2] [html.light_&]:hover:text-[#db2777] transition cursor-pointer"
+                  onClick={() => setIsMenuOpen((prev) => !prev)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-gray-300 hover:text-white hover:bg-[#162125] transition border border-teal-900/30 cursor-pointer"
+                  title="Opcje playlisty"
                 >
-                  <Edit2 className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
-                  <span>Edytuj playlistę</span>
+                  <MoreVertical className="h-5 w-5" />
                 </button>
-                <button
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    setIsDeleteModalOpen(true);
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 [html.light_&]:text-[#e11d48] [html.light_&]:hover:bg-red-50 transition cursor-pointer"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  <span>Usuń playlistę</span>
-                </button>
+
+                {isMenuOpen && (
+                  <div className="absolute right-0 top-11 z-50 w-48 rounded-2xl border border-teal-900/80 bg-[#0e1619] p-1.5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
+                    {playlist.canEditMetadata && (
+                      <button
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          setPreviewUrl(playlist.coverUrl || null);
+                          setSelectedFile(null);
+                          setIsEditModalOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-gray-200 hover:bg-[#162125] hover:text-teal-400 [html.light_&]:text-[#5c0612] [html.light_&]:hover:bg-[#fff1f2] [html.light_&]:hover:text-[#db2777] transition cursor-pointer"
+                      >
+                        <Edit2 className="h-4 w-4 text-teal-400 [html.light_&]:text-[#db2777]" />
+                        <span>Edytuj playlistę</span>
+                      </button>
+                    )}
+
+                    {playlist.isOwner && (
+                      <button
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          setIsDeleteModalOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 [html.light_&]:text-[#e11d48] [html.light_&]:hover:bg-red-50 transition cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Usuń playlistę</span>
+                      </button>
+                    )}
+
+                    {playlist.isMember && !playlist.isOwner && (
+                      <button
+                        onClick={() => {
+                          setIsMenuOpen(false);
+                          setIsLeaveModalOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/10 [html.light_&]:text-[#e11d48] [html.light_&]:hover:bg-red-50 transition cursor-pointer"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        <span>Opuść playlistę</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ) : null}
+        )}
       </div>
 
       {/* NAGŁÓWEK PLAYLISTY (UKŁAD POZIOMY) */}
@@ -668,18 +735,44 @@ export default function PlaylistView() {
                 </div>
               )}
 
-              {/* Twórca Playlisty z większym awatarem i czytelnym nickiem */}
-              <div className="flex items-center gap-2 pt-0.5">
-                <div className="h-5 w-5 rounded-full overflow-hidden bg-teal-950 border border-teal-800/60 flex items-center justify-center flex-shrink-0 [html.light_&]:border-[#fbcfe8]">
-                  {playlist.user?.avatarUrl ? (
-                    <img src={playlist.user.avatarUrl} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <UserIcon className="h-3 w-3 text-teal-400 [html.light_&]:text-[#db2777]" />
-                  )}
+              {/* Twórca Playlisty i Współtwórcy */}
+              <div className="flex items-center gap-2 pt-0.5 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-5 w-5 rounded-full overflow-hidden bg-teal-950 border border-teal-800/60 flex items-center justify-center flex-shrink-0 [html.light_&]:border-[#fbcfe8]">
+                    {playlist.user?.avatarUrl ? (
+                      <img src={playlist.user.avatarUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <UserIcon className="h-3 w-3 text-teal-400 [html.light_&]:text-[#db2777]" />
+                    )}
+                  </div>
+                  <span className="truncate font-bold text-sm text-white [html.light_&]:text-[#5c0612]">
+                    {playlist.user?.username || "Klima"}
+                  </span>
                 </div>
-                <span className="truncate font-bold text-sm text-white [html.light_&]:text-[#5c0612]">
-                  {playlist.user?.username || "Klima"}
-                </span>
+
+                {/* Sekcja awatarów współtwórców (limit do 16) */}
+                {playlist.is_collaborative && playlist.members && playlist.members.length > 0 && (
+                  <div className="flex items-center gap-1 ml-1 pl-2 border-l border-teal-900/50 [html.light_&]:border-[#fbcfe8]">
+                    <div className="flex -space-x-1.5 overflow-hidden">
+                      {playlist.members.slice(0, 4).map((m: any) => (
+                        <div
+                          key={m.userId}
+                          title={m.user?.username}
+                          className="h-5 w-5 rounded-full overflow-hidden border border-[#0e1619] bg-teal-950 flex items-center justify-center flex-shrink-0 [html.light_&]:border-white"
+                        >
+                          {m.user?.avatarUrl ? (
+                            <img src={m.user.avatarUrl} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <UserIcon className="h-2.5 w-2.5 text-teal-400 [html.light_&]:text-[#db2777]" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <span className="text-[10px] font-bold text-teal-400 [html.light_&]:text-[#db2777]">
+                      {playlist.members.length}/16
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -773,21 +866,31 @@ export default function PlaylistView() {
           const isThisTrackPlaying =
             isPlaying && String(currentTrack?.id) === String(song.id);
 
-          return (
-            <PlaylistItemRow
-              key={song.id}
-              song={song}
-              playlistName={playlist.name}
-              isThisTrackPlaying={isThisTrackPlaying}
-              songsList={songsList}
-              swipedIdx={swipedIdx}
-              setSwipedIdx={setSwipedIdx}
-              setAddedQueueNotice={setAddedQueueNotice}
-              setSongToDelete={setSongToDelete}
-              addToQueue={addToQueue}
-              setCurrentTrack={setCurrentTrack}
-            />
-          );
+          {
+            const songWrapper = playlist.songs?.find((item: any) => item.song.id === song.id);
+            const addedByUser = songWrapper?.addedBy || null;
+            // Host usuwa wszystko, współtwórca tylko swoje piosenki
+            const canDeleteThisSong =
+              playlist.isOwner || (playlist.isMember && songWrapper?.addedById === playlist.currentUserId);
+
+            return (
+              <PlaylistItemRow
+                key={song.id}
+                song={song}
+                addedBy={addedByUser}
+                canDeleteThisSong={canDeleteThisSong}
+                playlistName={playlist.name}
+                isThisTrackPlaying={isThisTrackPlaying}
+                songsList={songsList}
+                swipedIdx={swipedIdx}
+                setSwipedIdx={setSwipedIdx}
+                setAddedQueueNotice={setAddedQueueNotice}
+                setSongToDelete={setSongToDelete}
+                addToQueue={addToQueue}
+                setCurrentTrack={setCurrentTrack}
+              />
+            );
+          }
         })}
 
         {songsList.length === 0 && (
@@ -1168,6 +1271,33 @@ export default function PlaylistView() {
           </div>
         </div>
       )}
+
+      {/* Modal: Opuść playlistę współtworzoną */}
+      {isLeaveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-xs rounded-3xl border border-teal-900/60 bg-[#0e1619] p-6 shadow-2xl text-center [html.light_&]:bg-white [html.light_&]:border-[#fbcfe8]">
+            <AlertTriangle className="h-9 w-9 text-amber-400 mx-auto mb-3" />
+            <h4 className="text-sm font-bold text-white [html.light_&]:text-[#5c0612] mb-1">Opuść playlistę</h4>
+            <p className="text-xs text-gray-300 [html.light_&]:text-[#881337] mb-5 leading-relaxed">
+              Czy na pewno chcesz opuścić playlistę współtworzoną <span className="font-semibold text-white [html.light_&]:text-[#5c0612]">"{playlist.name}"</span>?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setIsLeaveModalOpen(false)}
+                className="flex-1 rounded-xl border border-teal-900/40 bg-[#162125] py-2.5 text-xs font-semibold text-gray-300 hover:text-white [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3] [html.light_&]:text-[#9f1239]"
+              >
+                Anuluj
+              </button>
+              <button
+                onClick={handleLeavePlaylist}
+                className="flex-1 rounded-xl bg-red-500/20 border border-red-500/40 py-2.5 text-xs font-semibold text-red-400 hover:bg-red-500/30"
+              >
+                Opuść
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1175,6 +1305,8 @@ export default function PlaylistView() {
 // Podkomponent pojedynczego utworu z prawdziwym Lazy Loadingiem (IntersectionObserver)
 function PlaylistItemRow({
   song,
+  addedBy,
+  canDeleteThisSong,
   playlistName,
   isThisTrackPlaying,
   songsList,
@@ -1401,16 +1533,35 @@ function PlaylistItemRow({
           </div>
         </div>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setSongToDelete(song.id);
-          }}
-          className="p-2 text-gray-500 hover:text-red-400 transition active:scale-125 flex-shrink-0"
-          title="Usuń z playlisty"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Awatar osoby, która dodała piosenkę (czerwony punkt ze screena) */}
+          {addedBy && (
+            <div
+              title={`Dodane przez: ${addedBy.username || "Użytkownik"}`}
+              className="h-6 w-6 rounded-full overflow-hidden border border-teal-500/40 bg-teal-950 flex items-center justify-center [html.light_&]:border-[#fbcfe8] [html.light_&]:bg-[#fff1f2]"
+            >
+              {addedBy.avatarUrl ? (
+                <img src={addedBy.avatarUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <UserIcon className="h-3 w-3 text-teal-400 [html.light_&]:text-[#db2777]" />
+              )}
+            </div>
+          )}
+
+          {/* Krzyżyk usuwania widoczny tylko jeśli user ma uprawnienia (Host lub autor) */}
+          {canDeleteThisSong && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setSongToDelete(song.id);
+              }}
+              className="p-1.5 text-gray-500 hover:text-red-400 transition active:scale-125"
+              title="Usuń z playlisty"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
