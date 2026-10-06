@@ -36,7 +36,6 @@ import {
 import { useDeviceStore } from "@/lib/store/device-store";
 import DevicePickerModal from "./DevicePickerModal";
 import { useJamStore } from "@/lib/store/jam-store";
-import JamModal from "@/components/player/JamModal";
 
 function YoutubeIcon({ className = "h-4 w-4" }: { className?: string }) {
   return (
@@ -745,7 +744,7 @@ export default function FullPlayer() {
                 ? "text-teal-400 [html.light_&]:!text-[#db2777]"
                 : "text-gray-400 hover:text-white [html.light_&]:!text-[#9f1239] [html.light_&]:hover:opacity-80"
             }`}
-            title="Songify Dżem (Wspólna sesja imprezowa)"
+            title="Songify Dżem (Wspólna sesja)"
           >
             <JamJarIcon className="h-5 w-5" />
             {jamCode && (
@@ -1462,9 +1461,6 @@ export default function FullPlayer() {
 
       {/* Modal wyboru urządzenia (Songify Connect) */}
       <DevicePickerModal />
-
-      {/* Modal Songify Dżem */}
-      <JamModal />
     </div>
   );
 }

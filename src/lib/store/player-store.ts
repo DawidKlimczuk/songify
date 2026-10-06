@@ -173,21 +173,18 @@ export const usePlayerStore = create<PlayerState>()(
           baseQueue = [{ ...currentTrack, id: String(currentTrack.id) }];
         }
 
-        if (baseQueue.length > 0) {
-          baseQueue.splice(1, 0, trackWithId);
-        } else {
-          baseQueue = [trackWithId];
-        }
+        // Prawidłowa kolejka FIFO: nowy utwór trafia ZAWSZE na koniec listy
+        const newQueue = [...baseQueue, trackWithId];
+        const newOriginal = [...originalQueue, trackWithId];
 
-        const newOriginal = [trackWithId, ...originalQueue];
         set({
-          queue: baseQueue,
+          queue: newQueue,
           originalQueue: newOriginal,
         });
 
         sendConnectCommand({
           type: "SYNC_QUEUE",
-          queue: baseQueue,
+          queue: newQueue,
           originalQueue: newOriginal,
         });
       },

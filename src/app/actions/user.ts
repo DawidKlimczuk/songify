@@ -1,6 +1,49 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { createClient } from "@/lib/supabase/server";
+
+export async function getCurrentUserProfile() {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser) return null;
+
+    // Pobieramy dane bezpośrednio z bazy przez Prismę (dokładnie jak dla reszty aplikacji)
+    const dbUser = await prisma.user.findUnique({
+      where: { id: authUser.id },
+      select: {
+        id: true,
+        username: true,
+        avatarUrl: true,
+      },
+    });
+
+    const username =
+      dbUser?.username ||
+      authUser.user_metadata?.username ||
+      authUser.user_metadata?.full_name ||
+      authUser.email?.split("@")[0] ||
+      "Uczestnik";
+
+    const avatarUrl =
+      dbUser?.avatarUrl ||
+      authUser.user_metadata?.avatar_url ||
+      null;
+
+    return {
+      id: authUser.id,
+      username,
+      avatarUrl,
+    };
+  } catch (error) {
+    console.error("Błąd pobierania profilu zalogowanego użytkownika:", error);
+    return null;
+  }
+}
 
 export async function getUserProfile(userId: string) {
   try {

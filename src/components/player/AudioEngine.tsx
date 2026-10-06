@@ -143,7 +143,10 @@ export default function AudioEngine() {
 
     setIsLoadingAudio(true);
 
-    const query = `${currentTrack.artist} - ${currentTrack.title}`;
+    const cleanTitle = currentTrack.title
+    .replace(/\s*-\s*(remastered|remaster|radio edit|deluxe|bonus track).*$/i, "")
+    .trim();
+    const query = `${currentTrack.artist} - ${cleanTitle}`;
 
     fetch(`/api/audio/stream?q=${encodeURIComponent(query)}`, {
       signal: abortController.signal,

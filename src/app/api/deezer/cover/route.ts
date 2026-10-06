@@ -47,7 +47,7 @@ export async function GET(request: Request) {
   // ==========================================
   try {
     const res = await fetch(
-      `https://api.deezer.com/search?q=${encodeURIComponent(`${cleanTitle}${cleanArtist}`)}&limit=10`,
+      `https://api.deezer.com/search?q=${encodeURIComponent(`${cleanTitle} ${cleanArtist}`)}&limit=10`,
       { cache: "no-store" }
     );
     if (res.ok) {
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
   // KROK 2: APPLE MUSIC / ITUNES (Piosenka z explicit=Yes)
   // ==========================================
   try {
-    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(`${cleanTitle}${cleanArtist}`)}&country=PL&media=music&entity=song&explicit=Yes&limit=15`;
+    const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(`${cleanTitle} ${cleanArtist}`)}&country=PL&media=music&entity=song&explicit=Yes&limit=15`;
     const itunesRes = await fetch(itunesUrl, {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
       cache: "no-store",

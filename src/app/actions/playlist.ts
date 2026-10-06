@@ -979,6 +979,8 @@ export async function overrideYouTubeTrack(title: string, artist: string, videoI
   // Zapisujemy wszystkie możliwe warianty zapytania z odtwarzacza
   const queriesToSave = Array.from(
     new Set([
+      normalize(`${artist} - ${title}`),
+      normalize(`${mainArtist} - ${title}`),
       normalize(`${title} ${artist}`),
       normalize(`${title} ${mainArtist}`),
       normalize(title),

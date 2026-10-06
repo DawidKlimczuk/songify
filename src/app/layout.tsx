@@ -8,8 +8,10 @@ import FullPlayer from "@/components/player/FullPlayer";
 import AudioEngine from "@/components/player/AudioEngine";
 import ConnectSyncEngine from "@/components/player/ConnectSyncEngine";
 import AddToPlaylistModal from "@/components/player/AddToPlaylistModal";
+import JamModal from "@/components/player/JamModal";
 import PwaRegister from "@/components/PwaRegister";
 import InstallPrompt from "@/components/InstallPrompt";
+
 
 const rubikDrip = Rubik_Wet_Paint({
   weight: "400",
@@ -80,6 +82,7 @@ export default function RootLayout({
           {children}
           <FullPlayer />
           <AddToPlaylistModal />
+          <JamModal />
           <MiniPlayer />
           <BottomNav />
         </div>
