@@ -1306,3 +1306,48 @@ export async function getRecommendedSongsForPlaylist(
     return [];
   }
 }
+
+function normalizeSongQuery(title: string, artist: string): string {
+  return `${artist} ${title}`
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// 1. Zapis tekstu w tle w youtube_cache
+export async function savePlainLyricsToDb(title: string, artist: string, plainLyrics: string) {
+  if (!title || !plainLyrics?.trim()) return;
+
+  const query = normalizeSongQuery(title, artist);
+  const cleanedText = plainLyrics.replace(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/g, "").trim();
+  if (!cleanedText) return;
+
+  try {
+    await prisma.youtube_cache.updateMany({
+      where: { query },
+      data: { lyrics: cleanedText },
+    });
+  } catch (err) {
+    console.error("Błąd zapisu lyrics do youtube_cache:", err);
+  }
+}
+
+// 2. Ręczny zapis tekstu przez usera w youtube_cache
+export async function updateSongLyrics(title: string, artist: string, rawText: string) {
+  if (!title) return { success: false };
+
+  const query = normalizeSongQuery(title, artist);
+  const cleanedText = rawText.replace(/\[\d{2}:\d{2}(?:\.\d{2,3})?\]/g, "").trim();
+
+  try {
+    await prisma.youtube_cache.updateMany({
+      where: { query },
+      data: { lyrics: cleanedText },
+    });
+    return { success: true };
+  } catch (error) {
+    console.error("Błąd aktualizacji tekstu w youtube_cache:", error);
+    return { success: false };
+  }
+}

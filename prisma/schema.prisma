@@ -77,6 +77,7 @@ model PlaylistSong {
 model youtube_cache {
   query      String   @id
   video_id   String
+  lyrics     String?  @db.Text
   created_at DateTime @default(now())
 
   @@map("youtube_cache")
