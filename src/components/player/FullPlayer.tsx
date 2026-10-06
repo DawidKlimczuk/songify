@@ -639,8 +639,8 @@ export default function FullPlayer() {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  const isLongTitle = currentTrack.title.length > 20;
-  const isLongArtist = (currentTrack.artist || "").length > 26;
+  const isLongTitle = currentTrack.title.length > 24;
+  const isLongArtist = (currentTrack.artist || "").length > 36;
   const artistLoopDuration = Math.max(16, Math.round((currentTrack.artist || "").length * 0.38 + 6));
   const titleLoopDuration = Math.max(12, Math.round(currentTrack.title.length * 0.4 + 5));
   const displayedTime = scrubbingTime !== null ? scrubbingTime : currentTime;
