@@ -706,9 +706,9 @@ export default function FullPlayer() {
           </button>
         </div>
 
-        {/* Sekcja Okładki - dynamiczny rozmiar z luzem na dole */}
-        <div className="my-auto flex flex-col items-center w-full pt-1">
-          <div className="relative aspect-square w-full max-w-[245px] sm:max-w-[280px] overflow-hidden rounded-3xl border border-teal-800/40 shadow-2xl shadow-teal-950/80 bg-[#121c20] flex items-center justify-center transition-all duration-300">
+        {/* Sekcja Okładki - duża okładka dopasowana pod telefon */}
+        <div className="my-auto flex flex-col items-center w-full pt-1 pb-1">
+          <div className="relative aspect-square w-full max-w-[305px] sm:max-w-[330px] overflow-hidden rounded-3xl border border-teal-800/40 shadow-2xl shadow-teal-950/80 bg-[#121c20] flex items-center justify-center transition-all duration-300">
             {currentTrack.albumCover && currentTrack.albumCover.trim() !== "" ? (
               <img
                 src={currentTrack.albumCover}
@@ -717,7 +717,7 @@ export default function FullPlayer() {
               />
             ) : (
               <div className="flex flex-col items-center justify-center text-teal-400/60">
-                <Music2 className="h-14 w-14" />
+                <Music2 className="h-16 w-16" />
               </div>
             )}
             {isLoadingAudio && (
@@ -728,7 +728,7 @@ export default function FullPlayer() {
           </div>
 
           {/* Tytuł i Wykonawca */}
-          <div className="mt-3 flex w-full max-w-[310px] items-center justify-between gap-4">
+          <div className="mt-4 flex w-full max-w-[325px] sm:max-w-[340px] items-center justify-between gap-4 px-1">
             <div className="min-w-0 flex-1 overflow-hidden [mask-image:linear-gradient(to_right,black_85%,transparent_100%)]">
               <div className="overflow-hidden">
                 {isLongTitle ? (
@@ -787,16 +787,16 @@ export default function FullPlayer() {
         </div>
 
         {/* DOLNA CZĘŚĆ (Linijka Live + Kontrolki + Napis tekstu) */}
-        <div className="w-full max-w-[340px] mx-auto space-y-3 pb-2">
-          {/* IDEALNIE WYPOZIOMOWANA I POWIĘKSZONA LINIJKA TEKSTU */}
-          <div className="h-[48px] w-full flex items-center justify-center overflow-hidden px-4 -mt-6 mb-3.5 select-none pointer-events-none">
+        <div className="w-full max-w-[340px] mx-auto space-y-2.5 pb-2">
+          {/* LINIJKA TEKSTU BEZPOŚREDNIO NAD PASKIEM POSTĘPU */}
+          <div className="min-h-[38px] w-full flex items-center justify-center overflow-hidden px-2 mb-1 select-none pointer-events-none">
             {lyricsData.synced && currentLiveLine ? (
               <p
                 key={`line-${activeLineIndex}`}
                 style={{
                   animation: "lyricsSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards",
                 }}
-                className="text-[15px] sm:text-base font-semibold text-white/95 text-center leading-snug tracking-normal line-clamp-2 antialiased drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)] [html.light_&]:text-[#831843] [html.light_&]:drop-shadow-none"
+                className="text-[14px] sm:text-[15px] font-semibold text-white/95 text-center leading-snug tracking-normal line-clamp-2 antialiased drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)] [html.light_&]:text-[#831843] [html.light_&]:drop-shadow-none"
               >
                 {currentLiveLine}
               </p>
@@ -1020,12 +1020,12 @@ export default function FullPlayer() {
                       key={idx}
                       data-index={idx}
                       onClick={() => seekTo(line.time)}
-                      className={`cursor-pointer transition-all duration-300 select-none ${
+                      className={`cursor-pointer transition-colors duration-200 select-none text-base leading-relaxed ${
                         isCurrent
-                          ? "text-xl font-bold !text-white scale-100 drop-shadow-[0_0_14px_rgba(255,255,255,0.7)]"
+                          ? "font-bold !text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.65)]"
                           : isPast
-                          ? "text-base font-medium !text-white/80"
-                          : "text-base font-medium !text-white/40"
+                          ? "font-medium !text-white/75"
+                          : "font-medium !text-white/40"
                       }`}
                     >
                       {line.text}
@@ -1090,12 +1090,12 @@ export default function FullPlayer() {
                     key={idx}
                     data-index={idx}
                     onClick={() => seekTo(line.time)}
-                    className={`cursor-pointer transition-all duration-300 select-none ${
+                    className={`cursor-pointer transition-colors duration-200 select-none text-lg leading-relaxed ${
                       isCurrent
-                        ? "text-2xl font-bold !text-white drop-shadow-[0_0_16px_rgba(255,255,255,0.75)] scale-100"
+                        ? "font-bold !text-white drop-shadow-[0_0_14px_rgba(255,255,255,0.7)]"
                         : isPast
-                        ? "text-lg font-medium !text-white/80"
-                        : "text-lg font-medium !text-white/40"
+                        ? "font-medium !text-white/75"
+                        : "font-medium !text-white/40"
                     }`}
                   >
                     {line.text}
