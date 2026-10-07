@@ -376,7 +376,7 @@ export async function getPlaylistDetails(playlistId: string) {
           },
         },
         orderBy: {
-          addedAt: "desc",
+          addedAt: "asc",
         },
       },
     },
@@ -1161,6 +1161,18 @@ export async function leaveCollaborativePlaylist(playlistId: string) {
   revalidatePath(`/library/playlist/${playlistId}`);
   return { success: true };
 }
+// Funkcja filtrująca techniczne śmieci i uszkodzone rekordy
+function isValidSongCandidate(song: { title: string; artist: string; albumCover?: string | null }) {
+  if (!song.title || !song.artist) return false;
+  if (!song.albumCover || song.albumCover.trim() === "") return false;
+
+  const t = song.title.trim();
+  // Odrzucamy kody ISRC (ciągi wielkich liter/cyfr bez spacji, np. FR9W11502027)
+  if (/^[A-Z0-9_-]{8,}$/i.test(t)) return false;
+  if (/^(PL|FR|US|GB|DE|ES)[A-Z0-9]{8,}$/i.test(t)) return false;
+
+  return true;
+}
 
 export async function getRecommendedSongsForPlaylist(
   playlistId: string,
@@ -1182,130 +1194,210 @@ export async function getRecommendedSongsForPlaylist(
       return [];
     }
 
-    const existingSongIds = new Set([
-      ...currentPlaylist.songs.map((s) => s.songId),
-      ...excludeSongIds,
+    // Wykluczamy po ścisłych ID (z playlisty oraz z historii sesji)
+    const existingSongIds = new Set<string>([
+      ...currentPlaylist.songs.map((s) => String(s.songId)),
+      ...excludeSongIds.map((id) => String(id)),
     ]);
 
-    const artists = Array.from(
+    const playlistSongTitles = new Set<string>(
+      currentPlaylist.songs.map((s) => s.song.title.toLowerCase().trim())
+    );
+
+    const playlistArtists = Array.from(
       new Set(
         currentPlaylist.songs
           .flatMap((s) => s.song.artist.split(/[,;&/]/))
           .map((a) => a.trim().toLowerCase())
-          .filter(Boolean)
+          .filter((a) => a.length >= 2)
       )
     );
 
-    const candidateSongs = await prisma.song.findMany({
-      where: {
-        id: { notIn: Array.from(existingSongIds) },
-        OR: artists.map((art) => ({
-          artist: { contains: art, mode: "insensitive" },
-        })),
-      },
-      take: 40,
-    });
-
+    const diversified: Array<{
+      id: string;
+      title: string;
+      artist: string;
+      albumCover: string;
+      duration: number | null;
+    }> = [];
     const seenArtists = new Set<string>();
-    const diversified: typeof candidateSongs = [];
 
-    const shuffled = [...candidateSongs].sort(() => 0.5 - Math.random());
-
-    for (const song of shuffled) {
-      const primaryArtist = song.artist.split(/[,;&/]/)[0].trim().toLowerCase();
-      if (!seenArtists.has(primaryArtist)) {
-        seenArtists.add(primaryArtist);
-        diversified.push(song);
-      }
-      if (diversified.length >= 5) break;
-    }
-
-    if (diversified.length < 5) {
-      const fallbackSongs = await prisma.song.findMany({
+    // -----------------------------------------------------------------
+    // ETAP 1: Lokalna baza danych (Ścisłe dopasowanie wykonawców z playlisty)
+    // -----------------------------------------------------------------
+    if (playlistArtists.length > 0) {
+      const localCandidates = await prisma.song.findMany({
         where: {
-          id: {
-            notIn: [
-              ...Array.from(existingSongIds),
-              ...diversified.map((s) => s.id),
-            ],
-          },
+          id: { notIn: Array.from(existingSongIds) },
+          OR: playlistArtists.map((art) => ({
+            artist: { mode: "insensitive", equals: art },
+          })),
         },
-        take: 15,
-        orderBy: { createdAt: "desc" },
+        take: 20,
       });
 
-      const shuffledFallback = [...fallbackSongs].sort(() => 0.5 - Math.random());
-      for (const song of shuffledFallback) {
-        if (diversified.length >= 5) break;
-        diversified.push(song);
+      const validLocal = localCandidates.filter(isValidSongCandidate);
+      const shuffledLocal = validLocal.sort(() => 0.5 - Math.random());
+
+      for (const song of shuffledLocal) {
+        const primaryArtist = song.artist.split(/[,;&/]/)[0].trim().toLowerCase();
+        const songTitleClean = song.title.toLowerCase().trim();
+
+        if (
+          !seenArtists.has(primaryArtist) &&
+          !playlistSongTitles.has(songTitleClean) &&
+          !existingSongIds.has(String(song.id))
+        ) {
+          seenArtists.add(primaryArtist);
+          diversified.push({
+            id: song.id,
+            title: song.title,
+            artist: song.artist,
+            albumCover: song.albumCover,
+            duration: song.duration,
+          });
+        }
+        if (diversified.length >= 2) break;
       }
     }
 
-    // Dociągamy bezpośredni link MP3 do 30s preview (Globalny Deezer + Globalny iTunes)
-    const withPreviews = await Promise.all(
-      diversified.map(async (s) => {
-        let previewUrl = "";
-        const cleanArtist = s.artist
-          .replace(/[\u00A0\u1680\u180e\u2000-\u200b\u202f\u205f\u3000\ufeff]/g, " ")
-          .split(/[,;&/]/)[0]
-          .trim();
-        const cleanTitle = s.title
-          .replace(/[\u00A0\u1680\u180e\u2000-\u200b\u202f\u205f\u3000\ufeff]/g, " ")
-          .replace(/\(.*?\)/g, "")
-          .replace(/\[.*?\]/g, "")
-          .trim();
+    // -----------------------------------------------------------------
+    // ETAP 2: Deezer Track Radio & Related Artists (Brak zależności od preview audio)
+    // -----------------------------------------------------------------
+    if (diversified.length < 5) {
+      const candidatesFromDeezer: any[] = [];
+      const shuffledPlaylistSongs = [...currentPlaylist.songs].sort(() => 0.5 - Math.random());
 
-        const globalQuery = `${cleanArtist} ${cleanTitle}`.trim();
+      for (const seed of shuffledPlaylistSongs) {
+        if (candidatesFromDeezer.length >= 25) break;
 
-        // 1. Globalne Deezer API (katalog światowy: US, UK, PL itp.)
+        const cleanArtist = seed.song.artist.split(/[,;&/]/)[0].trim();
+        const cleanTitle = seed.song.title.replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "").trim();
+        const searchQuery = `${cleanArtist} ${cleanTitle}`.trim();
+
         try {
-          const dzRes = await fetch(
-            `https://api.deezer.com/search?q=${encodeURIComponent(globalQuery)}&limit=1`,
+          const searchRes = await fetch(
+            `https://api.deezer.com/search?q=${encodeURIComponent(searchQuery)}&limit=1`,
             { next: { revalidate: 86400 } }
           );
-          if (dzRes.ok) {
-            const dzData = await dzRes.json();
-            if (dzData.data?.[0]?.preview) {
-              previewUrl = dzData.data[0].preview;
-            }
-          }
-        } catch {}
 
-        // 2. Globalny fallback iTunes (bez blokady na kraj)
-        if (!previewUrl) {
-          try {
-            const itunesRes = await fetch(
-              `https://itunes.apple.com/search?term=${encodeURIComponent(
-                globalQuery
-              )}&media=music&limit=1`,
-              { next: { revalidate: 86400 } }
-            );
-            if (itunesRes.ok) {
-              const itData = await itunesRes.json();
-              if (itData.results?.[0]?.previewUrl) {
-                previewUrl = itData.results[0].previewUrl;
+          if (searchRes.ok) {
+            const searchData = await searchRes.json();
+            const trackId = searchData.data?.[0]?.id;
+
+            if (trackId) {
+              const radioRes = await fetch(
+                `https://api.deezer.com/track/${trackId}/tracks?limit=30`,
+                { next: { revalidate: 1800 } }
+              );
+
+              if (radioRes.ok) {
+                const radioData = await radioRes.json();
+                if (Array.isArray(radioData.data)) {
+                  const mixedRadio = radioData.data.sort(() => 0.5 - Math.random());
+                  for (const tr of mixedRadio) {
+                    const trTitle = tr.title?.toLowerCase().trim();
+                    if (
+                      tr.title &&
+                      tr.artist?.name &&
+                      (tr.album?.cover_big || tr.album?.cover_medium) &&
+                      !playlistSongTitles.has(trTitle) &&
+                      !existingSongIds.has(String(tr.id)) &&
+                      !existingSongIds.has(`dz_${tr.id}`)
+                    ) {
+                      candidatesFromDeezer.push({
+                        id: `dz_${tr.id}`,
+                        title: tr.title,
+                        artist: tr.artist.name,
+                        albumCover: tr.album.cover_big || tr.album.cover_medium,
+                        duration: tr.duration,
+                      });
+                    }
+                  }
+                }
               }
             }
-          } catch {}
+          }
+        } catch (e) {
+          console.error("Błąd zapytania Track Radio:", e);
         }
+      }
 
-        return {
-          id: s.id,
-          title: s.title,
-          artist: s.artist,
-          albumCover: s.albumCover,
-          duration: s.duration,
-          previewUrl,
-        };
-      })
-    );
+      // Fallback: Related artists jeśli radio dało za mało wyników
+      if (candidatesFromDeezer.length < (5 - diversified.length) && playlistArtists.length > 0) {
+        try {
+          const sampleArtist = playlistArtists[Math.floor(Math.random() * playlistArtists.length)];
+          const artistSearchRes = await fetch(
+            `https://api.deezer.com/search/artist?q=${encodeURIComponent(sampleArtist)}&limit=1`,
+            { next: { revalidate: 86400 } }
+          );
 
-    return withPreviews;
+          if (artistSearchRes.ok) {
+            const aData = await artistSearchRes.json();
+            const aId = aData.data?.[0]?.id;
+            if (aId) {
+              const relRes = await fetch(
+                `https://api.deezer.com/artist/${aId}/related?limit=10`,
+                { next: { revalidate: 86400 } }
+              );
+              if (relRes.ok) {
+                const relData = await relRes.json();
+                const related = (relData.data || []).sort(() => 0.5 - Math.random());
+
+                for (const relArt of related.slice(0, 5)) {
+                  const topRes = await fetch(
+                    `https://api.deezer.com/artist/${relArt.id}/top?limit=5`,
+                    { next: { revalidate: 86400 } }
+                  );
+                  if (topRes.ok) {
+                    const topData = await topRes.json();
+                    if (Array.isArray(topData.data)) {
+                      for (const tr of topData.data) {
+                        const trTitle = tr.title?.toLowerCase().trim();
+                        if (
+                          !playlistSongTitles.has(trTitle) &&
+                          !existingSongIds.has(String(tr.id)) &&
+                          !existingSongIds.has(`dz_${tr.id}`)
+                        ) {
+                          candidatesFromDeezer.push({
+                            id: `dz_${tr.id}`,
+                            title: tr.title,
+                            artist: tr.artist?.name || relArt.name,
+                            albumCover: tr.album?.cover_big || tr.album?.cover_medium || "",
+                            duration: tr.duration,
+                          });
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error("Błąd fallbacku related artists:", e);
+        }
+      }
+
+      const shuffledExt = candidatesFromDeezer.sort(() => 0.5 - Math.random());
+      for (const cand of shuffledExt) {
+        const primArtist = cand.artist.split(/[,;&/]/)[0].trim().toLowerCase();
+        if (!seenArtists.has(primArtist)) {
+          seenArtists.add(primArtist);
+          diversified.push(cand);
+        }
+        if (diversified.length >= 5) break;
+      }
+    }
+
+    return diversified;
   } catch (error) {
     console.error("Błąd pobierania rekomendacji:", error);
     return [];
   }
 }
+
 
 function normalizeSongQuery(title: string, artist: string): string {
   return `${artist} ${title}`

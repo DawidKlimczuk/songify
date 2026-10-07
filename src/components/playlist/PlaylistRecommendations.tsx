@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Plus, RefreshCw, Check, Loader2, Music, Sparkles } from "lucide-react";
 import { usePlayerStore } from "@/lib/store/player-store";
-import { useDeviceStore } from "@/lib/store/device-store";
 import {
   getRecommendedSongsForPlaylist,
   addSongToPlaylist,
@@ -24,104 +23,64 @@ export function PlaylistRecommendations({
   const [isLoading, setIsLoading] = useState(false);
   const [addingId, setAddingId] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<string[]>([]);
-  const [playingPreviewId, setPlayingPreviewId] = useState<string | null>(null);
 
-  // Dostęp do globalnego playera, żeby go zatrzymać na czas preview
-  const { isPlaying, togglePlay } = usePlayerStore();
+  // Rejestr wszystkich odrzuconych w danej sesji (ID)
+  const seenHistoryRef = useRef<Set<string>>(new Set());
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const fadeIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  const stopPreview = () => {
-    if (fadeIntervalRef.current) {
-      clearInterval(fadeIntervalRef.current);
-      fadeIntervalRef.current = null;
-    }
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    setPlayingPreviewId(null);
-  };
+  // Dostęp do globalnego odtwarzacza Songify
+  const { setCurrentTrack, currentTrack, isPlaying } = usePlayerStore();
 
   const loadRecommendations = async (clearCurrent: boolean = false) => {
     if (songsCount === 0) return;
     setIsLoading(true);
 
-    const exclude = clearCurrent ? [] : recommendations.map((r) => r.id);
+    if (clearCurrent) {
+      seenHistoryRef.current.clear();
+    } else {
+      // Zapamiętujemy tylko identyfikatory odrzuconych utworów
+      recommendations.forEach((r) => {
+        if (r.id) seenHistoryRef.current.add(String(r.id));
+      });
+    }
+
+    const exclude = Array.from(seenHistoryRef.current);
     const data = await getRecommendedSongsForPlaylist(playlistId, exclude);
-    setRecommendations(data);
+
+    if (Array.isArray(data) && data.length > 0) {
+      data.forEach((r: any) => {
+        if (r.id) seenHistoryRef.current.add(String(r.id));
+      });
+      setRecommendations(data);
+    } else {
+      // Zabezpieczenie: jeśli wyczerpaliśmy unikalną pulę, czyścimy historię i losujemy od nowa
+      seenHistoryRef.current.clear();
+      const retryData = await getRecommendedSongsForPlaylist(playlistId, []);
+      setRecommendations(retryData || []);
+    }
+
     setIsLoading(false);
   };
 
+  const isLoadedForPlaylistRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (songsCount > 0) {
+    // Ładujemy propozycje tylko raz przy wejściu do playlisty
+    if (songsCount > 0 && isLoadedForPlaylistRef.current !== playlistId) {
+      isLoadedForPlaylistRef.current = playlistId;
       loadRecommendations(true);
     }
-    return () => {
-      stopPreview();
-    };
   }, [playlistId, songsCount]);
 
-  // Obsługa odsłuchu 10 sekund z fade-outem i respektowaniem głośności z odtwarzacza
-  const handlePlayPreview = async (song: any) => {
-    if (playingPreviewId === song.id) {
-      stopPreview();
-      return;
-    }
-
-    stopPreview();
-
-    // 1. Zatrzymujemy główny player, jeśli gra
-    if (isPlaying) {
-      togglePlay();
-    }
-
-    if (!song.previewUrl) {
-      console.warn("Brak podglądu audio dla:", song.title);
-      return;
-    }
-
-    try {
-      const audio = new Audio(song.previewUrl);
-      audioRef.current = audio;
-      setPlayingPreviewId(song.id);
-
-      // Pobieramy dokładną głośność ze store'a urządzeń (wartość 0 - 100 lub 0 - 1)
-      const rawVolume = useDeviceStore.getState().volume;
-      const initialVolume = typeof rawVolume === "number"
-        ? Math.min(Math.max(rawVolume > 1 ? rawVolume / 100 : rawVolume, 0), 1)
-        : 0.5;
-
-      audio.volume = initialVolume;
-      await audio.play();
-
-      // Po 8 sekundach płynny fade-out przez 2 sekundy od aktualnego poziomu
-      setTimeout(() => {
-        if (audioRef.current !== audio) return;
-
-        let currentVol = initialVolume;
-        const step = initialVolume / 10; // 10 kroków proporcjonalnie do poziomu głośności
-
-        fadeIntervalRef.current = setInterval(() => {
-          currentVol -= step;
-          if (currentVol <= 0.02) {
-            stopPreview();
-          } else if (audioRef.current) {
-            audioRef.current.volume = Math.max(0, currentVol);
-          }
-        }, 200);
-      }, 8000);
-
-      audio.onended = () => stopPreview();
-      audio.onerror = (e) => {
-        console.error("Błąd odtwarzania preview:", e);
-        stopPreview();
-      };
-    } catch (err) {
-      console.error("Błąd startu preview audio:", err);
-      stopPreview();
-    }
+  // Kliknięcie w utwór uruchamia go w głównym odtwarzaczu (dokładnie jak w Spotify)
+  const handlePlayInApp = (song: any) => {
+    setCurrentTrack({
+      id: song.id,
+      title: song.title,
+      artist: song.artist,
+      albumCover: song.albumCover,
+      duration: song.duration,
+      source: "Polecane utwory",
+    });
   };
 
   const handleAddSong = async (song: any) => {
@@ -186,22 +145,22 @@ export function PlaylistRecommendations({
       {/* Lista proponowanych kafelków */}
       <div className="space-y-1.5">
         {recommendations.map((song) => {
-          const isPlayingThis = playingPreviewId === song.id;
+          const isCurrentActive = String(currentTrack?.id) === String(song.id);
           const isAdded = addedIds.includes(song.id);
           const isAdding = addingId === song.id;
 
           return (
             <div
               key={song.id}
-              onClick={() => handlePlayPreview(song)}
+              onClick={() => handlePlayInApp(song)}
               className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer select-none ${
-                isPlayingThis
+                isCurrentActive
                   ? "bg-teal-950/40 border-teal-500/60 [html.light_&]:bg-[#fff1f2] [html.light_&]:border-[#db2777]"
                   : "bg-[#0e1619] border-teal-950/60 hover:border-teal-900/60 [html.light_&]:bg-[#fff5f7] [html.light_&]:border-[#fce7f3]"
               }`}
             >
               <div className="flex items-center gap-3 min-w-0 pr-2">
-                {/* Okładka z animowaną falą dźwiękową */}
+                {/* Okładka utworu */}
                 <div className="relative h-11 w-11 rounded-lg overflow-hidden flex-shrink-0 bg-[#142024] flex items-center justify-center">
                   {song.albumCover ? (
                     <img
@@ -213,8 +172,8 @@ export function PlaylistRecommendations({
                     <Music className="h-5 w-5 text-teal-500/40" />
                   )}
 
-                  {/* Animowana fala dźwiękowa podczas odsłuchu */}
-                  {isPlayingThis && (
+                  {/* Fala dźwiękowa jeśli ten utwór aktualnie gra w playerze */}
+                  {isCurrentActive && isPlaying && (
                     <div className="absolute inset-0 bg-black/60 flex items-center justify-center gap-0.5">
                       <span className="w-1 bg-teal-400 [html.light_&]:bg-[#db2777] rounded-full animate-[pulse_0.6s_ease-in-out_infinite] h-4" />
                       <span className="w-1 bg-teal-400 [html.light_&]:bg-[#db2777] rounded-full animate-[pulse_0.4s_ease-in-out_infinite] h-6" />
@@ -226,7 +185,7 @@ export function PlaylistRecommendations({
                 <div className="flex flex-col min-w-0">
                   <span
                     className={`truncate text-xs font-bold ${
-                      isPlayingThis
+                      isCurrentActive
                         ? "text-teal-400 [html.light_&]:text-[#db2777]"
                         : "text-white [html.light_&]:text-[#5c0612]"
                     }`}
