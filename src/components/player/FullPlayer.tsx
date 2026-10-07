@@ -706,9 +706,10 @@ export default function FullPlayer() {
           </button>
         </div>
 
-        {/* Sekcja Okładki - duża okładka dopasowana pod telefon */}
+        {/* Sekcja Okładki + Linijka tekstu pod nią */}
         <div className="my-auto flex flex-col items-center w-full pt-1 pb-1">
-          <div className="relative aspect-square w-full max-w-[305px] sm:max-w-[330px] overflow-hidden rounded-3xl border border-teal-800/40 shadow-2xl shadow-teal-950/80 bg-[#121c20] flex items-center justify-center transition-all duration-300">
+          {/* POKAXNA OKŁADKA NA TELEFONIE */}
+          <div className="relative aspect-square w-full max-w-[340px] sm:max-w-[360px] overflow-hidden rounded-3xl border border-teal-800/40 shadow-2xl shadow-teal-950/80 bg-[#121c20] flex items-center justify-center transition-all duration-300">
             {currentTrack.albumCover && currentTrack.albumCover.trim() !== "" ? (
               <img
                 src={currentTrack.albumCover}
@@ -727,8 +728,26 @@ export default function FullPlayer() {
             )}
           </div>
 
-          {/* Tytuł i Wykonawca */}
-          <div className="mt-4 flex w-full max-w-[325px] sm:max-w-[340px] items-center justify-between gap-4 px-1">
+          {/* LINIJKA TEKSTU LIVE - BEZPOŚREDNIO POD OKŁADKĄ */}
+          <div className="h-[40px] w-full max-w-[340px] flex items-center justify-center overflow-hidden px-3 mt-3 select-none pointer-events-none">
+            {lyricsData.synced && currentLiveLine ? (
+              <p
+                key={`line-${activeLineIndex}`}
+                style={{
+                  animation: "lyricsSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards",
+                }}
+                className="text-[14px] sm:text-[15px] font-semibold text-white/95 text-center leading-snug tracking-normal line-clamp-2 antialiased drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)] [html.light_&]:text-[#831843] [html.light_&]:drop-shadow-none"
+              >
+                {currentLiveLine}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        {/* DOLNA CZĘŚĆ (Tytuł + Autor + Serduszko, Pasek postępu, Kontrolki) */}
+        <div className="w-full max-w-[340px] mx-auto space-y-2 pb-2">
+          {/* TYTUŁ, AUTOR I SERDUSZKO - BEZPOŚREDNIO NAD PASKIEM POSTĘPU */}
+          <div className="flex w-full items-center justify-between gap-4 px-1 pb-1">
             <div className="min-w-0 flex-1 overflow-hidden [mask-image:linear-gradient(to_right,black_85%,transparent_100%)]">
               <div className="overflow-hidden">
                 {isLongTitle ? (
@@ -736,15 +755,15 @@ export default function FullPlayer() {
                     className="animate-spotify-loop"
                     style={{ animationDuration: `${titleLoopDuration}s` }}
                   >
-                    <span className="text-lg sm:text-xl font-bold tracking-tight text-white pr-12 whitespace-nowrap">
+                    <span className="text-xl font-bold tracking-tight text-white pr-12 whitespace-nowrap">
                       {currentTrack.title}
                     </span>
-                    <span className="text-lg sm:text-xl font-bold tracking-tight text-white pr-12 whitespace-nowrap">
+                    <span className="text-xl font-bold tracking-tight text-white pr-12 whitespace-nowrap">
                       {currentTrack.title}
                     </span>
                   </div>
                 ) : (
-                  <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white truncate">
+                  <h2 className="text-xl font-bold tracking-tight text-white truncate">
                     {currentTrack.title}
                   </h2>
                 )}
@@ -784,25 +803,7 @@ export default function FullPlayer() {
               />
             </button>
           </div>
-        </div>
 
-        {/* DOLNA CZĘŚĆ (Linijka Live + Kontrolki + Napis tekstu) */}
-        <div className="w-full max-w-[340px] mx-auto space-y-2.5 pb-2">
-          {/* LINIJKA TEKSTU BEZPOŚREDNIO NAD PASKIEM POSTĘPU */}
-          <div className="min-h-[38px] w-full flex items-center justify-center overflow-hidden px-2 mb-1 select-none pointer-events-none">
-            {lyricsData.synced && currentLiveLine ? (
-              <p
-                key={`line-${activeLineIndex}`}
-                style={{
-                  animation: "lyricsSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards",
-                }}
-                className="text-[14px] sm:text-[15px] font-semibold text-white/95 text-center leading-snug tracking-normal line-clamp-2 antialiased drop-shadow-[0_2px_12px_rgba(0,0,0,0.85)] [html.light_&]:text-[#831843] [html.light_&]:drop-shadow-none"
-              >
-                {currentLiveLine}
-              </p>
-            ) : null}
-
-          </div>
           {/* Pasek postępu */}
           <div className="w-full">
             <div className="relative flex items-center h-4 w-full cursor-pointer group">
