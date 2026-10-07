@@ -65,7 +65,7 @@ export async function getUserPlaylists() {
         },
       },
     },
-    orderBy: { createdAt: "asc" },
+    orderBy: { createdAt: "desc" },
   });
 
   const formattedPlaylists = playlists.map((p: any) => ({
